@@ -1,0 +1,38 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # tsx never typechecks, so a red build can coexist with green tests: run tsc
+      # over src *and* test/scripts before anything else.
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run verify-fixtures
+      - run: npm test
+      - run: npm run coverage
+      - run: npm run smoke
+      # The published launch path: a global install runs the bin symlink, not the file.
+      - run: npm run smoke-bin
+      - run: npm run smoke-http
+      - run: npm run check-secrets
+      - run: npm run check-tool-refs
+      - run: node docs/check-docs.mjs tools
+      - run: node docs/check-docs.mjs envvars
+      - run: node docs/check-docs.mjs links
+      # Writing rules from AGENTS.md, tree-wide: the banned dash, banned marketing
+      # vocabulary, decorative comment banners, and a spaced hyphen doing dash
+      # punctuation in prose. Each detector proves itself on a positive control, and
+      # the file walk fails if it matches too few files, so a green run cannot mean
+      # the scope quietly narrowed. It scans untracked source too, so a new file is
+      # covered before it is ever committed.
+      - run: node docs/check-docs.mjs hygiene
+      # demo-dump needs the sibling captured dump, which never leaves the machine.

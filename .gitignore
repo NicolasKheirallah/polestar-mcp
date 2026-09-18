@@ -1,0 +1,27 @@
+node_modules/
+build/
+*.log
+
+# Credentials and local env files. `.env` alone does not match `.env.secrets`,
+# so the whole family is ignored; never commit a file holding a live token.
+.env
+.env.*
+*.env
+
+# The one exception: a valueless template that documents which variables to set.
+# It must be committable to be useful, and scripts/check-secrets.mjs still scans
+# its contents, so a real token pasted in here is still a finding.
+!.env.example
+
+# Editor/tool scratch output.
+__pycache__/
+.DS_Store
+*.tsbuildinfo
+
+# Agent working state: local tool config, audit notes, run scratch. These can quote
+# real identifiers while investigating a bug, so they stay untracked by policy.
+.unlazy/
+anti-slop/
+
+# npm cache used when the sandbox blocks ~/.npm (see CI).
+.npm-cache/

@@ -1,0 +1,60 @@
+name: Bug report
+description: Something does not do what the documentation says it does
+labels: bug
+body:
+  - type: markdown
+    value: |
+      Redact anything secret before pasting. `requestId` is safe and useful; tokens,
+      Account IDs and real VINs are not. See SECURITY.md for what to leave out.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The tool you called, what you expected, what came back instead.
+      placeholder: get_car_status returned DATA_NOT_AVAILABLE for battery on a car that is charging.
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - stdio
+        - Streamable HTTP
+        - Fixture mode (POLESTAR_FIXTURES_DIR)
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Output of `polestar_status`, Node version, and your `POLESTAR_*` variable names
+        with values removed. Do not paste `.env.secrets`.
+      render: shell
+      placeholder: |
+        Mode: live
+        API budget: 412/10000 used (9588 left), resets 2026-09-19T00:00:00.000Z
+        Cache: 180 hits + 40 stale-served of 300 reads (73%)
+        Node 22.12.0
+        POLESTAR_ACCOUNT_ID=<set> POLESTAR_UNITS=km POLESTAR_ALLOW_LOCATION=off
+    validations:
+      required: true
+  - type: textarea
+    id: request-id
+    attributes:
+      label: requestId and structured error
+      description: |
+        If the result carried `code`, `httpStatus` or `requestId`, paste them. That is
+        what makes an upstream problem distinguishable from a local one.
+      render: json
+      placeholder: '{ "ok": false, "code": "AUTHZ_CLIENT_ID_MISMATCH", "requestId": "..." }'
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks already run
+      options:
+        - label: I reproduced this in fixture mode, or it only happens live
+          required: false
+        - label: I ran `npm test` and `npm run smoke` on a clean checkout
+          required: false

@@ -1,0 +1,50 @@
+name: Feature or data request
+description: A new tool, a Domain the server does not read, or a change in behaviour
+labels: enhancement
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: What are you trying to answer about your car?
+      description: |
+        Name the question first, not the tool. Aggregate answers usually need fewer
+        calls than the sum of their parts, and the daily allowance is shared.
+      placeholder: I want to know whether the car is still charging when I leave home.
+    validations:
+      required: true
+  - type: textarea
+    id: data
+    attributes:
+      label: Data involved
+      description: |
+        Which Domain or Domains carry it (see `list_domains`), and whether your vehicle
+        actually reports them. A Domain a car does not report answers `DATA_NOT_AVAILABLE`.
+  - type: dropdown
+    id: readonly
+    attributes:
+      label: Is this a read?
+      description: |
+        Polestar publishes no v1 write endpoints, so this server registers none.
+        `POLESTAR_ENABLE_WRITES` exists as the opt-in for the day that changes.
+      options:
+        - Read only
+        - Would require writing to the car
+    validations:
+      required: true
+  - type: textarea
+    id: cost
+    attributes:
+      label: Cost against the allowance
+      description: |
+        Roughly how many live calls per answer, and whether the cache in front of them
+        would absorb repeats. The API allows 10,000 calls per client per day and 100
+        per minute; polling designs need to say so.
+  - type: checkboxes
+    id: agreement
+    attributes:
+      label: Agreement
+      options:
+        - label: I have read CONTRIBUTING.md, including the vocabulary in its domain table
+          required: true
+        - label: I understand a change here must arrive with something that can fail on it
+          required: true

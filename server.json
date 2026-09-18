@@ -1,0 +1,25 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-01/server.schema.json",
+  "name": "io.github.nicolaskheirallah/polestar-mcp",
+  "description": "Read-only Polestar Data Portal (M2M) telemetry and charging for MCP clients.",
+  "repository": {
+    "url": "https://github.com/nicolaskheirallah/polestar-mcp",
+    "source": "github"
+  },
+  "version": "0.3.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "name": "polestar-mcp",
+      "version": "0.3.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        { "name": "POLESTAR_CLIENT_ID", "required": true, "description": "Data Portal M2M OAuth client id." },
+        { "name": "POLESTAR_CLIENT_SECRET", "required": true, "isSecret": true, "description": "Data Portal M2M OAuth client secret." },
+        { "name": "POLESTAR_ACCOUNT_ID", "required": true, "description": "Account ID sent as x-client-id. Not the OAuth client id: the gateway returns 403 AUTHZ_CLIENT_ID_MISMATCH for that." },
+        { "name": "POLESTAR_ALLOW_LOCATION", "required": false, "description": "Set false to never request or return vehicle position." },
+        { "name": "POLESTAR_FIXTURES_DIR", "required": false, "description": "Offline mode against captured responses; no credentials needed." }
+      ]
+    }
+  ]
+}
