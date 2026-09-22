@@ -20,7 +20,11 @@ const PROJECT_ROOT = path.resolve(fileURLToPath(new URL('.', import.meta.url)), 
 // where hash-like blobs match the credential shapes by accident. `.npm-cache`
 // appears because CI may run npm with a workspace-local cache.
 const SKIP_DIRS = new Set(['node_modules', 'build', '.git', '.npm-cache', '.unlazy', 'dist']);
-const SKIP_EXTENSIONS = new Set(['.png', '.jpg', '.ico', '.map']);
+// A PDF is a binary container. Its bytes decoded as text are noise that matches
+// the shape detectors by accident, and its real text can sit in compressed
+// streams the detectors can never see, so a scan proves nothing in either
+// direction. Same class as the image formats next to it.
+const SKIP_EXTENSIONS = new Set(['.png', '.jpg', '.ico', '.map', '.pdf']);
 // The checker necessarily holds the patterns; excluding it is not a loophole,
 // it carries the needles and never the secrets.
 const SELF = path.resolve(fileURLToPath(import.meta.url));
