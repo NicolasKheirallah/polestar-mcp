@@ -3,6 +3,21 @@
 All notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow SemVer.
 
+## Unreleased
+
+### Added
+
+- The handbook's live probe findings, consumer API design note, and write endpoint
+  safety design as markdown docs: `docs/live-contract-findings.md`,
+  `docs/consumer-adapter-note.md`, `docs/write-endpoints.md`.
+
+### Removed
+
+- `polestar-mcp-handbook.pdf`. Its other chapters already exist as the markdown
+  docs set (getting started, tool reference, architecture, upstream API,
+  development), which the CI gates keep in sync with the code; the PDF was a
+  rendered snapshot of those plus the three new files.
+
 ## 0.3.0
 
 Surface and reliability work against the Polestar Data Portal M2M API, verified with live

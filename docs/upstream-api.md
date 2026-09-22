@@ -97,7 +97,7 @@ All API errors share one envelope:
 
 ## Write scopes without write endpoints
 
-Tokens can carry write-flavored scopes such as `pdp-charging/targetSoc` and `pdp-charging/overrideChargeTimer`, and the read endpoints documented here use those same scope names. What the sandbox documentation does not publish is any v1 write endpoint: there is no documented way to set a target state of charge or override a charge timer over the M2M API today. The server therefore requests the union of its domain scopes (overridable with `POLESTAR_SCOPES` for a least-privilege token) and implements only reads. Nothing here writes; the flag that would gate future write tools registers nothing until endpoints exist.
+Tokens can carry write-flavored scopes such as `pdp-charging/targetSoc` and `pdp-charging/overrideChargeTimer`, and the read endpoints documented here use those same scope names. What the sandbox documentation does not publish is any v1 write endpoint: there is no documented way to set a target state of charge or override a charge timer over the M2M API today. The server therefore requests the union of its domain scopes (overridable with `POLESTAR_SCOPES` for a least-privilege token) and implements only reads. Nothing here writes; the flag that would gate future write tools registers nothing until endpoints exist. The design waiting for those endpoints, including the safety rules that are non-negotiable when they do, is in [write-endpoints.md](write-endpoints.md).
 
 ## What the server adds on top of the contract
 

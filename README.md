@@ -245,7 +245,10 @@ Every API error carries the `requestId` and `timestamp` Polestar support can loo
 | [Tool reference](docs/tools-reference.md) | All 26 tools, endpoints and scopes, example responses |
 | [Architecture](docs/architecture.md) | The client module, the cache/retry/budget chain, history, resources, HTTP mode |
 | [The upstream API contract](docs/upstream-api.md) | Authentication, headers, envelope, errors, rate limits |
+| [Live contract findings](docs/live-contract-findings.md) | What live probes settled about identity headers, VINs, domains, errors, and the token endpoint |
 | [Development and verification](docs/development.md) | The test map, the CI checks, adding a tool |
+| [Consumer API adapter note](docs/consumer-adapter-note.md) | Why the consumer app API stays unwired, and the shape when it lands |
+| [Write endpoints](docs/write-endpoints.md) | The designed but dormant write surface and its safety rules |
 
 ## Status
 
