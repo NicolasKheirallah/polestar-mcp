@@ -34,7 +34,7 @@
   "dependencies": {
     "zod": "^4.6.5",
     "@modelcontextprotocol/server": "^2.3.1",
-    "@modelcontextprotocol/node": "^2.0.0"
+    "@modelcontextprotocol/node": "^2.1.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
