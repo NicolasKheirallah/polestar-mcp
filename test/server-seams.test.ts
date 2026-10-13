@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { buildEngine } from '../src/server.js';
+import { buildEngine, createMcpServer } from '../src/server.js';
+import { HistorySampler } from '../src/sampler.js';
+import { BudgetMeter } from '../src/budget.js';
 import { decideBind, unauthenticatedBody } from '../src/bind.js';
 import { createSubscriptionPoller } from '../src/subscriptions.js';
 import { DOMAINS } from '../src/domains.js';
 import { aggregateToolSpecs } from '../src/aggregate-tools.js';
 import { systemToolSpecs } from '../src/system-tools.js';
+import { toolSpec } from '../src/tools.js';
 import { historyToolSpecs } from '../src/history-tools.js';
 import { advisorToolSpecs } from '../src/advisor-tools.js';
 import type { ToolDeps } from '../src/tool-output.js';
@@ -83,6 +86,23 @@ test('a subscription notifies only when the cloud reports a new metaEventId', as
   assert.equal(h.poller.size, 0);
 });
 
+test('a stopped poller stops the clock and forgets its target', async () => {
+  // `stop()` used to clear the timer only, leaving the map behind. A surface that
+  // had closed then still reported one subscription, which is how a finished HTTP
+  // request could look like it was still polling.
+  const h = harness({ metaEventIds: ['e1'] });
+  await h.poller.subscribe(URI);
+  assert.equal(h.poller.size, 1);
+
+  h.poller.stop();
+  assert.equal(h.poller.size, 0, 'nothing is left to poll');
+  await h.tick();
+  assert.deepEqual(h.notified, [], 'and the round never runs');
+
+  h.poller.stop();
+  assert.equal(h.poller.size, 0, 'stopping twice is not an error');
+});
+
 test('subscriptions stand down rather than spend the last tenth of the daily budget', async () => {
   const h = harness({ metaEventIds: ['a', 'b'], lowBudget: true });
   await h.poller.subscribe(URI);
@@ -110,6 +130,84 @@ test('buildEngine composes a runnable server from the environment alone', () => 
   engine.sampler?.stop();
   engine.budget.consume();
   assert.equal(engine.budget.snapshot().used, 1);
+});
+
+test('a surface owns the poller it starts, and close stops it', async () => {
+  // The poller used to be created inside the resource registration and pushed
+  // into a module-level array, so a surface could not say how much background
+  // work it was responsible for, and the HTTP teardown closed the transport and
+  // the server but never the poller it had just created: a stateless deployment
+  // kept one per request until a signal arrived.
+  const dump = new URL('../test/fixtures/dump', import.meta.url).pathname;
+  const engine = buildEngine({ POLESTAR_FIXTURES_DIR: dump, POLESTAR_HISTORY_DIR: undefined });
+
+  const timers: Array<() => void> = [];
+  const surface = createMcpServer(engine, {
+    pollerClock: {
+      setTimer: (callback: () => void) => {
+        timers.push(callback);
+        return {};
+      },
+      clearTimer: () => {
+        timers.length = 0;
+      },
+    },
+  });
+
+  assert.equal(surface.subscriptions, 0);
+  assert.equal(timers.length, 0, 'a surface nobody subscribed to polls nothing');
+
+  await surface.subscribe(URI);
+  assert.equal(surface.subscriptions, 1);
+  assert.equal(timers.length, 1, 'subscribing is what starts the clock');
+
+  surface.unsubscribe(URI);
+  assert.equal(surface.subscriptions, 0);
+  assert.equal(timers.length, 0, 'the last unsubscribe stops it');
+
+  await surface.subscribe(URI);
+  assert.equal(timers.length, 1);
+  await surface.close();
+  assert.equal(surface.subscriptions, 0, 'a closed surface holds no subscriptions');
+  assert.equal(timers.length, 0, 'and stopped the poller it had created');
+  await surface.close();
+  assert.equal(timers.length, 0, 'closing twice is not an error');
+});
+
+test('polestar_status prints what the sampler says, and nothing when there is no sampler', async () => {
+  // The tool asks the sampler rather than being handed a sentence built from the
+  // environment, so the line can only be as wrong as the sampler is. History off
+  // means no sampler at all, and then the whole line has to disappear.
+  const base = {
+    client: {} as unknown as PolestarClient,
+    redactVin: false,
+    vehicleLabels: {},
+    delegatedAccounts: [],
+    units: 'km' as const,
+    budget: { snapshot: () => ({ used: 0, limit: 10_000, remaining: 10_000, fractionUsed: 0, resetsAtUtc: 'soon' }) },
+    minute: { snapshot: () => ({ used: 0, limit: 100 }) },
+    cacheStats: undefined,
+    tokenExpiresAt: () => undefined,
+    fixtureMode: true,
+  };
+  // A sleep that never resolves: the sampler is started but no round ever runs.
+  const never = (): Promise<void> => new Promise<void>(() => undefined);
+  const sampler = new HistorySampler(
+    { vehicles: async () => [] } as unknown as PolestarClient,
+    new BudgetMeter(10_000),
+    async () => undefined,
+    { intervalSeconds: 900, sleep: never },
+  );
+
+  const off = await toolSpec(systemToolSpecs({ ...base, sampler } as never), 'polestar_status').run({}, {});
+  assert.match(off.content[0]!.text, /Background sampling: off, history records only/);
+
+  await sampler.start();
+  const on = await toolSpec(systemToolSpecs({ ...base, sampler } as never), 'polestar_status').run({}, {});
+  assert.match(on.content[0]!.text, /Background sampling: on, but this credential reports no vehicle to sample/);
+
+  const without = await toolSpec(systemToolSpecs(base as never), 'polestar_status').run({}, {});
+  assert.doesNotMatch(without.content[0]!.text, /Background sampling/, 'no sampler, no line');
 });
 
 test('the prompts and the registry agree on every tool name', async () => {
@@ -153,4 +251,35 @@ test('every Domain states the keys its fixture must hold', () => {
   }
   const battery = DOMAINS.find((d) => d.name === 'battery');
   assert.ok(battery?.pinnedKeys.includes('batteryChargeLevelPercentage'));
+});
+
+test('the security verdict and the status count answer from one exterior rule', async () => {
+  // get_car_status asks "is anything open" and is_car_secure asks "is the car
+  // shut and locked". Those are different questions, and before exteriorView
+  // existed each derived its answer from its own filter, so the tank-lid
+  // exclusion lived as one silent predicate inside one of them and the other
+  // could not see it.
+  const vin = 'YSMTEST22PL000001';
+  const client = {
+    async resolveVin(v?: string) { return v ?? vin; },
+    async vehicles() { return [vin]; },
+    async domain() {
+      return {
+        centralLock: 'LOCK_STATUS_LOCKED',
+        tailgateLock: 'LOCK_STATUS_LOCKED',
+        tankLid: 'OPEN_STATUS_OPEN',
+        frontLeftDoor: 'OPEN_STATUS_CLOSED',
+        alarm: 'ALARM_STATUS_OK',
+      };
+    },
+  } as unknown as PolestarClient;
+  const deps = { client, redactVin: false, vehicleLabels: {}, delegatedAccounts: [], units: 'km' } as ToolDeps;
+  const specs = aggregateToolSpecs(deps);
+  const textOf = (r: { content: ReadonlyArray<{ text: string }> }): string => r.content.map((c) => c.text).join('\n');
+
+  const secure = await toolSpec(specs, 'is_car_secure').run({}, {});
+  assert.match(textOf(secure), /Yes, car is secure/, 'an open charge flap is not a lock failure');
+
+  const status = await toolSpec(specs, 'get_car_status').run({}, {});
+  assert.match(textOf(status), /1 item\(s\) open/, 'the same flap is still a fact worth reporting');
 });

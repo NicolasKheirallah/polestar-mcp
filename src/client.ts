@@ -1,3 +1,4 @@
+import { domainRequestPath, VEHICLES_PATH } from './domains.js';
 import type { TokenProvider } from './auth.js';
 import type { Transport, TransportResponse } from './transport.js';
 
@@ -26,6 +27,26 @@ export interface PolestarClientOptions {
   delegatedAccountId?: string;
   /** False blocks the position domain at the request layer, not just its display. */
   allowLocation?: boolean;
+  /**
+   * Called with the unwrapped payload after every successful domain GET.
+   *
+   * The Envelope is read here, where it was unwrapped. A recorder used to be
+   * handed whatever bytes the cache had passed along and reach into
+   * `body.data.metaEventId` itself, which put a PolestarClient concept inside the
+   * Transport that only carried it.
+   */
+  onDomainRead?: ((observation: DomainObservation) => void) | undefined;
+}
+
+/** One successful domain read, as this client saw it. */
+export interface DomainObservation {
+  vin: string;
+  kind: DomainKind;
+  name: string;
+  /** The unwrapped payload. Never null: an absent Domain is not an observation. */
+  data: Record<string, unknown>;
+  /** The cloud-assigned change id the payload carries, when it carries one. */
+  metaEventId: string | undefined;
 }
 
 interface ApiErrorEnvelope {
@@ -68,10 +89,10 @@ export class PolestarClient {
 
   /** VINs this credential is authorized to access. */
   async vehicles(): Promise<string[]> {
-    const { status, parsed } = await this.request('/v1/vehicles');
+    const { status, parsed } = await this.request(VEHICLES_PATH);
     const data = (parsed as { data?: unknown }).data;
     if (!Array.isArray(data)) {
-      throw new PolestarApiError('BAD_RESPONSE', 'GET /v1/vehicles response has no data array.', status);
+      throw new PolestarApiError('BAD_RESPONSE', `GET ${VEHICLES_PATH} response has no data array.`, status);
     }
     return data.map(String);
   }
@@ -123,7 +144,7 @@ export class PolestarClient {
         403,
       );
     }
-    const path = `/v1/vehicles/${encodeURIComponent(vin)}/${kind}/${name}`;
+    const path = domainRequestPath(vin, kind, name);
     const res = await this.requestRaw(path);
 
     if (res.status === 404 && parseErrorBody(res.body)?.error?.code === 'DATA_NOT_AVAILABLE') {
@@ -143,6 +164,17 @@ export class PolestarClient {
       throw new PolestarApiError('BAD_RESPONSE', `Domain ${kind}/${name} returned a non-object data payload.`, res.status);
     }
     assertIdentity(envelope, data, vin, kind, name);
+    if (data !== null && data !== undefined && typeof data === 'object' && !Array.isArray(data)) {
+      const payload = data as Record<string, unknown>;
+      const metaEventId = payload.metaEventId;
+      this.opts.onDomainRead?.({
+        vin,
+        kind,
+        name,
+        data: payload,
+        metaEventId: typeof metaEventId === 'string' ? metaEventId : undefined,
+      });
+    }
     return (data ?? null) as Record<string, unknown> | null;
   }
 

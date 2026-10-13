@@ -11,23 +11,33 @@ import { TransportError } from './transport.js';
  * is keyed by it, so
  * minting a new code without deciding what to tell the caller is a type error
  * rather than a result that arrives with no advice attached.
+ *
+ * One value, three derivations: the union is read off this tuple, membership is a
+ * Set built from the same tuple, and the hint table is keyed by the union. These
+ * were three hand-written copies of one list, and the Set was the copy the
+ * compiler could not see, so a code added to the union compiled and then dropped
+ * to `minted: undefined`, losing the very hint MINTED_HINTS had just been forced
+ * to provide.
  */
-export type MintedCode =
-  | 'INVALID_VIN'
-  | 'AMBIGUOUS_VIN'
-  | 'NO_VEHICLES'
-  | 'VIN_NOT_CHOSEN'
-  | 'VIN_MISMATCH'
-  | 'DOMAIN_MISMATCH'
-  | 'LOCATION_DISALLOWED'
-  | 'DELEGATION_NOT_ALLOWED'
-  | 'BAD_RESPONSE'
-  | 'AUTH_ERROR'
-  | 'TRANSPORT_TIMEOUT'
-  | 'TRANSPORT_NETWORK'
-  | 'RATE_LIMIT_EXCEEDED'
-  | 'RATE_LIMIT_MINUTE'
-  | 'INTERNAL_ERROR';
+export const MINTED_CODES = [
+  'INVALID_VIN',
+  'AMBIGUOUS_VIN',
+  'NO_VEHICLES',
+  'VIN_NOT_CHOSEN',
+  'VIN_MISMATCH',
+  'DOMAIN_MISMATCH',
+  'LOCATION_DISALLOWED',
+  'DELEGATION_NOT_ALLOWED',
+  'BAD_RESPONSE',
+  'AUTH_ERROR',
+  'TRANSPORT_TIMEOUT',
+  'TRANSPORT_NETWORK',
+  'RATE_LIMIT_EXCEEDED',
+  'RATE_LIMIT_MINUTE',
+  'INTERNAL_ERROR',
+] as const;
+
+export type MintedCode = (typeof MINTED_CODES)[number];
 
 /**
  * What a failed call looks like once it has left its raising module.
@@ -48,25 +58,9 @@ export interface Failure {
   minted?: MintedCode | undefined;
 }
 
-const isMinted = (code: string): code is MintedCode => MINTED.has(code);
+const MINTED: ReadonlySet<string> = new Set<string>(MINTED_CODES);
 
-const MINTED = new Set<string>([
-  'INVALID_VIN',
-  'AMBIGUOUS_VIN',
-  'NO_VEHICLES',
-  'VIN_NOT_CHOSEN',
-  'VIN_MISMATCH',
-  'DOMAIN_MISMATCH',
-  'LOCATION_DISALLOWED',
-  'DELEGATION_NOT_ALLOWED',
-  'BAD_RESPONSE',
-  'AUTH_ERROR',
-  'TRANSPORT_TIMEOUT',
-  'TRANSPORT_NETWORK',
-  'RATE_LIMIT_EXCEEDED',
-  'RATE_LIMIT_MINUTE',
-  'INTERNAL_ERROR',
-]);
+const isMinted = (code: string): code is MintedCode => MINTED.has(code);
 
 const base = (message: string): Failure => ({ code: 'INTERNAL_ERROR', message, minted: 'INTERNAL_ERROR' });
 

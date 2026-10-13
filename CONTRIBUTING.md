@@ -49,7 +49,7 @@ explicitly instead of guessing.
 | --- | --- |
 | `npm run typecheck` | `src`, `test` and `scripts` all compile under `strict` plus `exactOptionalPropertyTypes`. `tsx` never typechecks, so without this a red build can hide behind green tests. |
 | `npm run build` | The published `build/server.js` exists and is executable. |
-| `npm test` | Unit behaviour: token lifecycle, Envelope and identity checks, error normalization, budget metering, retry and cache policy, the humanizer, the planner, the tool registry. |
+| `npm test` | Unit behaviour: token lifecycle, Envelope and identity checks, error normalization, budget metering, retry and cache policy, the humanizer, the planner, the tool registry, and the shared vehicle-read seam (every tool asks the client which vehicle to use, every tool states a missing Domain in the same words, and the resource read is the tool read). |
 | `npm run coverage` | How much of the source the unit suite reaches. |
 | `npm run smoke` / `npm run smoke-http` | The real MCP surface end to end: handshake, every tool registered, `outputSchema` on all of them, resources, prompts, elicitation. |
 | `npm run smoke-bin` | The published launch path: `--version`, `--help` and a handshake against `build/server.js` through its bin symlink, the way a global install and `npx` run it. |
@@ -81,6 +81,12 @@ contract test all derive from that row, so a new Domain is one edit plus a captu
 A row with no summarizer used to fail quietly by dumping raw payloads into the model's
 context. `test/contract.test.ts` now refuses that, and every distance a summary renders has to
 honour `POLESTAR_UNITS` or the same test fails.
+
+A new row also needs no new plumbing. Which Vehicle a call is about, how its Domains are read,
+and what to say when the car reports nothing all live in `src/vehicle-read.ts`, so the `get_*`
+tool and the `polestar://` resource for the new Domain come out of the row itself. If you find
+yourself resolving a VIN or writing a "no data" sentence in a tool body, that code belongs in
+that module instead.
 
 ## House rules this codebase already follows
 

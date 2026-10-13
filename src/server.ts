@@ -13,22 +13,22 @@ import { BudgetMeter, MinuteWindowMeter } from './budget.js';
 import { CachingTransport } from './caching-transport.js';
 import { PolestarClient } from './client.js';
 import { collectScopes, DOMAINS } from './domains.js';
-import { createSubscriptionPoller, type SubscriptionPoller } from './subscriptions.js';
+import { createSubscriptionPoller, type SubscriptionDeps, type SubscriptionPoller } from './subscriptions.js';
 import { decideBind, unauthenticatedBody } from './bind.js';
 import { domainToolSpecs } from './domain-tools.js';
 import { aggregateToolSpecs } from './aggregate-tools.js';
 import { advisorToolSpecs } from './advisor-tools.js';
 import { historyToolSpecs } from './history-tools.js';
 import { systemToolSpecs } from './system-tools.js';
-import { registerTools, type ToolSpec } from './tools.js';
+import { registerTools, toolNames, type ToolSpec } from './tools.js';
 import { accountIdLooksLikeClientId, loadConfig, loadEnvFileInto, unknownEnvFatal, unknownEnvVariables, type Config } from './config.js';
-import { HistorySampler, intervalSeconds, SAMPLED_DOMAINS, SAMPLER_BUDGET_GUARD } from './sampler.js';
+import { HistorySampler, SAMPLED_DOMAINS } from './sampler.js';
 import { HistoryStore } from './history.js';
-import { maskVin, summarizeDomain } from './format.js';
+import { readDomain } from './vehicle-read.js';
 import { z } from 'zod';
 import { FixtureTransport, HttpTransport, type Transport } from './transport.js';
 import { RetryingTransport } from './retrying-transport.js';
-import { describeError, type ToolDeps } from './tool-output.js';
+import { resultText, type ToolDeps } from './tool-output.js';
 
 const require = createRequire(import.meta.url);
 const PKG_VERSION: string = require('../package.json').version;
@@ -73,9 +73,9 @@ export function buildEngine(env: NodeJS.ProcessEnv): Engine {
     ? new FixtureTransport(config.fixturesDir)
     : new HttpTransport(config.timeoutMs);
   // Retry + budget metering are live-API concerns; fixture reads are free.
-  // The cache is always in the chain because the history recorder hooks into
-  // it, in fixture mode it runs cache-disabled only when history is off,
-  // since a static fixture would otherwise cache-dedupe nothing useful.
+  // The cache is in the chain whenever live reads are worth not repeating. It no
+  // longer plays any part in history recording: the recorder watches the client's
+  // unwrapped result instead of the raw body passing through here.
   const inner: Transport =
     config.fixturesDir || config.cacheDisabled ? base : new RetryingTransport(base, { budget, minute });
   const cache = new CachingTransport(inner, {
@@ -85,20 +85,6 @@ export function buildEngine(env: NodeJS.ProcessEnv): Engine {
       log(`background refresh failed for ${new URL(url).pathname}: ${message}`);
     },
     disabled: config.cacheDisabled || (config.fixturesDir !== undefined && store === undefined),
-    ...(store
-      ? {
-          onLiveDomainResponse: ({ vin, kind, name, body }) => {
-            // The cloud re-serves an unchanged metaEventId until the car
-            // reports anew, so the store dedupes on it and files only grow
-            // when something actually changed.
-            const data = (body as { data?: Record<string, unknown> | null }).data;
-            const metaEventId = (body as { data?: { metaEventId?: string } | null }).data?.metaEventId;
-            if (data && typeof data === 'object') {
-              store.append(vin, kind, name, { observedAt: Date.now(), metaEventId, data });
-            }
-          },
-        }
-      : {}),
   });
   cacheStats = cache.stats;
   transport = cache;
@@ -114,6 +100,18 @@ export function buildEngine(env: NodeJS.ProcessEnv): Engine {
     accountId: config.accountId,
     allowLocation: config.allowLocation,
     ...(config.delegatedAccountId ? { delegatedAccountId: config.delegatedAccountId } : {}),
+    ...(store === undefined
+      ? {}
+      : {
+          // The cloud re-serves an unchanged metaEventId until the car reports
+          // anew, so the store dedupes on it and files only grow when something
+          // actually changed. Watching the client rather than the bytes means the
+          // recorder sees the payload already unwrapped, with the change id read
+          // out of the same Envelope the client just opened.
+          onDomainRead: ({ vin, kind, name, data, metaEventId }) => {
+            store.append(vin, kind, name, { observedAt: Date.now(), metaEventId, data });
+          },
+        }),
   });
 
   let sampler: HistorySampler | undefined;
@@ -134,12 +132,33 @@ export function buildEngine(env: NodeJS.ProcessEnv): Engine {
   return { config, budget, minute, cacheStats, client, tokenProvider, store, sampler, log };
 }
 
-/** Live subscription pollers, so a shutdown can stop every timer it started. */
-const liveSubscriptions: SubscriptionPoller[] = [];
+/**
+ * One MCP surface and everything it started.
+ *
+ * Pollers used to live in a module-level array every surface pushed into, which
+ * made a surface's lifetime unownable. HTTP mode builds one surface per request
+ * and its teardown closed the transport and the server but never the poller it
+ * had just created, so a stateless deployment kept one per request until a signal
+ * arrived, while the comment beside that teardown and the docs both said
+ * subscriptions were a stdio feature. A surface now closes what it opened, so
+ * nothing about a resource outlives the thing that created it.
+ */
+export interface McpSurface {
+  server: McpServer;
+  /** Every tool this surface registered, which is the list the instructions name. */
+  toolNames: readonly string[];
+  /** How many resource subscriptions this surface is polling for. */
+  readonly subscriptions: number;
+  /** Subscribe to a resource URI and start polling. The protocol handler calls this. */
+  subscribe(uri: string): Promise<void>;
+  unsubscribe(uri: string): void;
+  /** Stop every poller this surface started, then close the session. Idempotent. */
+  close(): Promise<void>;
+}
 
-/** Stop every running poller. Called on shutdown; safe to call twice. */
-export function stopSubscriptions(): void {
-  while (liveSubscriptions.length > 0) liveSubscriptions.pop()?.stop();
+/** The poller's clock, so a test need not wait a minute. Same hooks subscriptions.ts takes. */
+export interface McpSurfaceOptions {
+  pollerClock?: Pick<SubscriptionDeps, 'intervalMs' | 'setTimer' | 'clearTimer'>;
 }
 
 /**
@@ -148,15 +167,19 @@ export function stopSubscriptions(): void {
  * completions and metaEventId-driven subscriptions, and starter prompts.
  * Every read tool carries readOnlyHint so clients can auto-approve.
  */
-function createMcpServer(engine: Engine): McpServer {
+export function createMcpServer(engine: Engine, options: McpSurfaceOptions = {}): McpSurface {
   const deps: ToolDeps = { client: engine.client, redactVin: engine.config.redactVin, vehicleLabels: engine.config.vehicleLabels, delegatedAccounts: engine.config.delegatedAccounts, units: engine.config.units };
 
   // The registry is built before the server that advertises it. The instructions
   // used to be a hand-written copy of these names and limits, and had drifted:
   // they sent every agent to a `get_security_status` that was never registered.
+  // Built once: the instructions below name the aggregates, and rebuilding the
+  // registry inside that string meant one surface carried two copies of it.
+  const aggregates = aggregateToolSpecs(deps);
+  const store = engine.store;
   const specs: ToolSpec[] = [
     ...domainToolSpecs(deps),
-    ...aggregateToolSpecs(deps),
+    ...aggregates,
     ...advisorToolSpecs(deps),
     ...systemToolSpecs({
       ...deps,
@@ -165,12 +188,9 @@ function createMcpServer(engine: Engine): McpServer {
       cacheStats: engine.cacheStats,
       tokenExpiresAt: () => engine.tokenProvider.expiresAt(),
       fixtureMode: engine.config.fixturesDir !== undefined,
-      samplerState: () => (engine.store === undefined
-        ? undefined
-        : engine.config.sample
-          ? `on, every ${intervalSeconds(engine.config.historySampleSeconds)}s, stands down at ${Math.round(SAMPLER_BUDGET_GUARD * 100)}% of the daily budget`
-          : 'off, history records only what tool calls read (enable with POLESTAR_SAMPLE=on)'),
+      ...(engine.sampler === undefined ? {} : { sampler: engine.sampler }),
     }),
+    ...(store === undefined ? [] : historyToolSpecs({ ...deps, store })),
   ];
 
   const server = new McpServer(
@@ -180,7 +200,7 @@ function createMcpServer(engine: Engine): McpServer {
         'Polestar Data Portal (M2M) is READ-ONLY: every tool is a GET, no command is sent to the car.',
         'Start with list_vehicles. On a credential that sees exactly one vehicle the vin argument may be omitted.',
         'Domain data is reported by the car, not by the API: fields are absent when unreported, and a whole domain can answer DATA_NOT_AVAILABLE. That is normal, not an error.',
-        `Prefer ${aggregateToolSpecs(deps).map((s) => s.name).join(' or ')} over the ${DOMAINS.length} individual domain reads; every live call spends a shared allowance of ${engine.config.budgetLimit.toLocaleString('en-US')} calls/day and ${engine.minute.snapshot().limit}/minute, and polestar_status reports what is left.`,
+        `Prefer ${aggregates.map((s) => s.name).join(' or ')} over the ${DOMAINS.length} individual domain reads; every live call spends a shared allowance of ${engine.config.budgetLimit.toLocaleString('en-US')} calls/day and ${engine.minute.snapshot().limit}/minute, and polestar_status reports what is left.`,
         'Every payload carries an age: charging configuration can be days old while telemetry is minutes old, so read the age before treating a value as current.',
         'Errors come back as structured JSON with a code, httpStatus and requestId. Quote the requestId when reporting a problem.',
       ].join(' '),
@@ -189,24 +209,52 @@ function createMcpServer(engine: Engine): McpServer {
   );
 
   registerTools(server, specs);
-  const store = engine.store;
-  if (store !== undefined) {
-    registerTools(server, historyToolSpecs({ ...deps, store }));
-  }
   if (engine.config.enableWrites) {
     // No v1 write endpoints exist yet; the flag is
     // the deliberate opt-in they will slot behind when Polestar ships them.
     engine.log('POLESTAR_ENABLE_WRITES is set, but the documented v1 API has no write endpoints, nothing registered.');
   }
 
-  registerResources(server, engine, deps);
+  // Subscriptions: the SDK declares the protocol but not the bookkeeping. The
+  // poller lives in subscriptions.ts, where the clock and the budget are
+  // parameters instead of a closure. It is created here, by the same object that
+  // closes it, rather than inside the resource registration: the thing that
+  // starts a timer owns stopping it.
+  const subscriptions = createSubscriptionPoller({
+    read: (vin, kind, name) => engine.client.domain(vin, kind, name),
+    budget: engine.budget,
+    notify: (uri) => server.server.sendResourceUpdated({ uri }),
+    log: engine.log,
+    ...(options.pollerClock ?? {}),
+  });
+
+  registerResources(server, engine, deps, subscriptions);
   registerPrompts(server);
-  return server;
+
+  return {
+    server,
+    toolNames: toolNames(specs),
+    get subscriptions() {
+      return subscriptions.size;
+    },
+    async subscribe(uri: string) {
+      await subscriptions.subscribe(uri);
+    },
+    unsubscribe(uri: string) {
+      subscriptions.unsubscribe(uri);
+    },
+    async close() {
+      // The poller stops before the session: a timer that outlives the server it
+      // notifies would try to send on a closed transport.
+      subscriptions.stop();
+      await server.close();
+    },
+  };
 }
 
 const RESOURCE_KINDS = ['telemetry', 'charging'] as const;
 
-function registerResources(server: McpServer, engine: Engine, deps: ToolDeps): void {
+function registerResources(server: McpServer, engine: Engine, deps: ToolDeps, subscriptions: SubscriptionPoller): void {
   const domainsOf = (kind: (typeof RESOURCE_KINDS)[number]): string[] =>
     DOMAINS.filter((d) => d.kind === kind).map((d) => d.name);
 
@@ -248,33 +296,16 @@ function registerResources(server: McpServer, engine: Engine, deps: ToolDeps): v
         if (!spec) {
           return { contents: [{ uri: uri.href, text: `Unknown ${kind} domain "${domain}".`, mimeType: 'text/plain' }] };
         }
-        try {
-          const resolvedVin = await engine.client.resolveVin(vin || undefined);
-          const data = await engine.client.domain(resolvedVin, kind, spec.name);
-          if (data === null) {
-            return { contents: [{ uri: uri.href, text: `No ${spec.name} data available (DATA_NOT_AVAILABLE).`, mimeType: 'text/plain' }] };
-          }
-          const lines = [
-            `Vehicle ${maskVin(resolvedVin, deps.redactVin)}, ${kind}/${spec.name}`,
-            ...(summarizeDomain(spec.name, data, engine.config.units) ?? [JSON.stringify(data, null, 2)]),
-          ];
-          return { contents: [{ uri: uri.href, text: lines.join('\n'), mimeType: 'text/plain' }] };
-        } catch (err) {
-          return { contents: [{ uri: uri.href, text: describeError(err), mimeType: 'text/plain' }] };
-        }
+        // The very read get_${spec.name.replace(/-/g, '_')} performs, so a resource
+        // gains the age header, the owner label, the redaction and the delegation
+        // check instead of a second, smaller implementation of the same read. A
+        // resource cannot answer isError, so a failure arrives as text.
+        const outcome = await readDomain(deps, spec, vin === '' ? {} : { vin }, undefined);
+        const body = outcome.ok ? outcome.reading.text : resultText(outcome.result);
+        return { contents: [{ uri: uri.href, text: body, mimeType: 'text/plain' }] };
       },
     );
   }
-
-  // Subscriptions: the SDK declares the protocol but not the bookkeeping. The
-  // poller lives in subscriptions.ts, where the clock and the budget are
-  // parameters instead of a closure over this function's locals.
-  const subscriptions = createSubscriptionPoller({
-    read: (vin, kind, name) => engine.client.domain(vin, kind, name),
-    budget: engine.budget,
-    notify: (uri) => server.server.sendResourceUpdated({ uri }),
-    log: engine.log,
-  });
 
   server.server.setRequestHandler('resources/subscribe', async (request: { params: { uri: string } }) => {
     await subscriptions.subscribe(request.params.uri);
@@ -284,7 +315,6 @@ function registerResources(server: McpServer, engine: Engine, deps: ToolDeps): v
     subscriptions.unsubscribe(request.params.uri);
     return {};
   });
-  liveSubscriptions.push(subscriptions);
 }
 
 function registerPrompts(server: McpServer): void {
@@ -380,12 +410,12 @@ async function serveHttp(engine: Engine, port: number): Promise<void> {
     // feature; HTTP serves tools, resources, and prompts.
     void (async () => {
       const transport = new NodeStreamableHTTPServerTransport({ enableJsonResponse: true });
-      const server = createMcpServer(engine);
+      const surface = createMcpServer(engine);
       res.on('close', () => {
         void transport.close();
-        void server.close();
+        void surface.close();
       });
-      await server.connect(transport as unknown as Parameters<typeof server.connect>[0]);
+      await surface.server.connect(transport as unknown as Parameters<typeof surface.server.connect>[0]);
       await transport.handleRequest(req, res);
     })().catch((err: unknown) => {
       engine.log(`HTTP request failed: ${err instanceof Error ? err.message : err}`);
@@ -396,7 +426,7 @@ async function serveHttp(engine: Engine, port: number): Promise<void> {
   if (token !== '') engine.log('HTTP mode: Authorization: Bearer <POLESTAR_HTTP_TOKEN> required');
   await new Promise<void>((resolveListen) => guarded.listen(port, host, resolveListen));
   startSampler(engine);
-  installShutdown(async () => { engine.sampler?.stop(); stopSubscriptions(); guarded.close(); }, engine.log);
+  installShutdown(async () => { engine.sampler?.stop(); guarded.close(); }, engine.log);
   engine.log(`HTTP mode: http://${host}:${port} (stateless; tools/resources/prompts, no subscriptions)`);
 }
 
@@ -521,11 +551,16 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<void> 
     return;
   }
 
-  const server = createMcpServer(engine);
-  await server.connect(new StdioServerTransport());
+  const surface = createMcpServer(engine);
+  await surface.server.connect(new StdioServerTransport());
   startSampler(engine);
-  installShutdown(async () => { engine.sampler?.stop(); stopSubscriptions(); await server.close(); }, engine.log);
-  engine.log(`ready: ${DOMAINS.length} domains + status/security/attention/estimate/planner/status tools · rate limit 10,000 calls/day`);
+  installShutdown(async () => { engine.sampler?.stop(); await surface.close(); }, engine.log);
+  // Both numbers come from the surface and the config that the lines above
+  // actually used: this line used to restate "10,000 calls/day" and a hand-copied
+  // tool list naming status twice, so it was wrong under POLESTAR_BUDGET.
+  engine.log(
+    `ready: ${surface.toolNames.length} tools over ${DOMAINS.length} domains · rate limit ${engine.config.budgetLimit.toLocaleString('en-US')} calls/day`,
+  );
 }
 
 // Compare realpaths: a global install or `npx` launches this file through its bin

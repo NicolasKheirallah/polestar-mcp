@@ -1,5 +1,5 @@
 import type { Transport, TransportRequest, TransportResponse } from './transport.js';
-import { findDomain, parseDomainPath, VEHICLES_TTL_MS } from './domains.js';
+import { findDomain, parseDomainPath, VEHICLES_PATH, VEHICLES_TTL_MS } from './domains.js';
 
 export interface CacheStats {
   hits: number;
@@ -10,20 +10,10 @@ export interface CacheStats {
   entries: number;
 }
 
-export type HistoryRecorder = (record: {
-  url: string;
-  vin: string;
-  kind: string;
-  name: string;
-  body: unknown;
-}) => void;
-
 export interface CachingTransportOptions {
   disabled?: boolean;
   /** Injectable clock for tests. */
   now?: () => number;
-  /** Called after every successful live domain GET (never for cache hits). */
-  onLiveDomainResponse?: HistoryRecorder;
   /**
    * Called when a stale-while-revalidate refresh fails. Without this the failed
    * refresh was a dropped promise: the cache kept serving an entry that got
@@ -44,7 +34,6 @@ interface CacheEntry {
  * anything unexpected) gets the conservative default below.
  */
 const DEFAULT_TTL_MS = 60 * 1000;
-const VEHICLES_PATH = /\/v1\/vehicles$/;
 
 function findDomainTtl(ref: { kind: string; name: string }): number {
   const spec = findDomain(ref.kind, ref.name);
@@ -121,7 +110,6 @@ export class CachingTransport implements Transport {
       .then((response) => {
         if (response.status < 400) {
           this.entries.set(key, { response, fetchedAt: this.now(), ttlMs: this.ttlFor(key) });
-          this.recordIfDomain(key, response);
         }
         this.stats.refreshes += 1;
         return response;
@@ -139,27 +127,10 @@ export class CachingTransport implements Transport {
     return promise;
   }
 
-  private recordIfDomain(url: string, response: TransportResponse): void {
-    if (!this.opts.onLiveDomainResponse) return;
-    const ref = parseDomainPath(new URL(url).pathname);
-    if (ref === undefined) return;
-    try {
-      this.opts.onLiveDomainResponse({
-        url,
-        vin: ref.vin,
-        kind: ref.kind,
-        name: ref.name,
-        body: JSON.parse(response.body),
-      });
-    } catch {
-      // History must never break reads; ignore recorder failures here.
-    }
-  }
-
   /** The Domain's own freshness rule, or the conservative default. */
   private ttlFor(url: string): number {
     const pathname = new URL(url).pathname;
-    if (VEHICLES_PATH.test(pathname)) return VEHICLES_TTL_MS;
+    if (pathname.endsWith(VEHICLES_PATH)) return VEHICLES_TTL_MS;
     const ref = parseDomainPath(pathname);
     return ref === undefined ? DEFAULT_TTL_MS : findDomainTtl(ref);
   }

@@ -172,7 +172,7 @@ Three dials control what leaves your car and how it is named:
 
 ## HTTP mode
 
-Set `POLESTAR_HTTP_PORT=8420 npm start` and the same engine serves tools, resources, and prompts over stateless Streamable HTTP: each request is independent, while cache, budget, and history are shared. It binds `127.0.0.1` by default; binding any other address requires `POLESTAR_HTTP_TOKEN`, because a server that reads vehicle location must not sit unauthenticated on a shared network. Subscriptions remain a stdio feature.
+Set `POLESTAR_HTTP_PORT=8420 npm start` and the same engine serves tools, resources, and prompts over stateless Streamable HTTP: each request is independent, while cache, budget, and history are shared. It binds `127.0.0.1` by default; binding any other address requires `POLESTAR_HTTP_TOKEN`, because a server that reads vehicle location must not sit unauthenticated on a shared network. Resources and subscriptions work in both modes; each request's server stops the poller it started when the response closes.
 
 <details>
 <summary><strong>Full configuration reference (27 variables)</strong></summary>

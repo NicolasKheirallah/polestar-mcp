@@ -1,12 +1,14 @@
 import { z } from 'zod';
 import { planCheapestCharge, type PriceSlot } from './planner.js';
-import { ampLimitA, chargeLevelPct, chargeWindow, chargingPowerWatts, chargingVoltageVolts, energyAvailableKwh, targetSoc } from './domain-data.js';
+import { ampLimitA, batteryView, chargeWindow, targetSoc } from './domain-data.js';
 import { ASSUMED_LINE_VOLTS, chargeModel } from './charge-model.js';
-import { errorResult, text, vinArg, type ToolContext, type ToolDeps, type ToolResult } from './tool-output.js';
+import { delegatedAccountArg, errorResult, text, vinArg, type ToolContext, type ToolDeps, type ToolResult } from './tool-output.js';
+import { noData, readDomains, vehicleFor } from './vehicle-read.js';
 import type { ToolSpec } from './tools.js';
 
 const planArgs = {
   ...vinArg,
+  ...delegatedAccountArg,
   prices: z
     .array(z.object({ startsAt: z.string(), price: z.number() }))
     .describe('Hourly prices from your spot-price provider: [{startsAt: "2026-09-19T22:00:00+02:00", price: 0.42}, ...]'),
@@ -42,29 +44,36 @@ export function advisorToolSpecs(deps: ToolDeps): ToolSpec[] {
         'Given hourly electricity prices, computes the cheapest hours inside the car\'s charge window (from global-charge-timer) that deliver enough energy to reach the target charge level.',
       args: planArgs,
       annotations: { readOnlyHint: true, openWorldHint: true },
-      run: async (args: PlanArgs, _ctx: ToolContext): Promise<ToolResult> => {
+      run: async (args: PlanArgs, ctx: ToolContext): Promise<ToolResult> => {
         try {
-          const vin = await deps.client.resolveVin(args.vin);
+          const found = await vehicleFor(deps, ctx, args, 'pick-vehicle-plan');
+          if (!found.ok) return found.result;
+          const { battery, target, amp, timer } = await readDomains(found.vehicle, {
+            battery: { kind: 'telemetry', name: 'battery' },
+            target: { kind: 'charging', name: 'target-soc' },
+            amp: { kind: 'charging', name: 'amp-limit' },
+            timer: { kind: 'charging', name: 'global-charge-timer' },
+          });
           const phases = args.phases ?? 3;
-          const [battery, target, amp, timer] = await Promise.all([
-            deps.client.domain(vin, 'telemetry', 'battery'),
-            deps.client.domain(vin, 'charging', 'target-soc'),
-            deps.client.domain(vin, 'charging', 'amp-limit'),
-            deps.client.domain(vin, 'charging', 'global-charge-timer'),
-          ]);
+
+          if (battery === null) {
+            return noData(found.vehicle, { kind: 'telemetry', name: 'battery' }, 'Without the charge level there is nothing to plan from.');
+          }
 
           const window = chargeWindow(timer);
+          const targetSeen = targetSoc(target);
+          const batterySeen = batteryView(battery);
           const model = chargeModel({
-            socPct: chargeLevelPct(battery),
-            targetPct: targetSoc(target).levelPct,
+            socPct: batterySeen.chargeLevelPct,
+            targetPct: targetSeen.levelPct,
             ampLimitA: ampLimitA(amp),
-            reportedVolts: chargingVoltageVolts(battery),
-            livePowerW: chargingPowerWatts(battery),
-            energyAvailableKwh: energyAvailableKwh(battery),
+            reportedVolts: batterySeen.volts,
+            livePowerW: batterySeen.powerWatts,
+            energyAvailableKwh: batterySeen.energyAvailableKwh,
             phases,
           });
-          const soc = chargeLevelPct(battery);
-          const targetPct = targetSoc(target).levelPct;
+          const soc = batterySeen.chargeLevelPct;
+          const targetPct = targetSeen.levelPct;
           const amps = ampLimitA(amp);
 
           if (typeof soc !== 'number' || typeof targetPct !== 'number' || amps === undefined) {

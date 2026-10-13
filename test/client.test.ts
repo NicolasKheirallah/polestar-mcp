@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { PolestarApiError, PolestarClient } from '../src/client.js';
+import { PolestarApiError, PolestarClient, type DomainObservation } from '../src/client.js';
 import { TokenProvider } from '../src/auth.js';
 import { FixtureTransport } from '../src/transport.js';
+import { domainPath, domainRequestPath } from '../src/domains.js';
 import { fileURLToPath } from 'node:url';
 import { ScriptedTransport, tokenBody } from './helpers.js';
 
@@ -14,7 +15,7 @@ interface StubResponse {
   body: string;
 }
 
-function makeClient(responses: StubResponse[], opts: { delegatedAccountId?: string } = {}) {
+function makeClient(responses: StubResponse[], opts: { delegatedAccountId?: string; onDomainRead?: (o: DomainObservation) => void } = {}) {
   const transport = new ScriptedTransport(responses);
   const tp = new TokenProvider(transport, {
     tokenUrl: `${BASE}/token`,
@@ -25,6 +26,7 @@ function makeClient(responses: StubResponse[], opts: { delegatedAccountId?: stri
     baseUrl: BASE,
     accountId: 'account-1',
     ...(opts.delegatedAccountId ? { delegatedAccountId: opts.delegatedAccountId } : {}),
+    ...(opts.onDomainRead ? { onDomainRead: opts.onDomainRead } : {}),
   });
   return { client, transport };
 }
@@ -50,6 +52,96 @@ test('sends bearer token, x-client-id and accept headers to the right URL', asyn
   assert.equal(dataCall.request.headers?.authorization, 'Bearer t');
   assert.equal(dataCall.request.headers?.['x-client-id'], 'account-1');
   assert.equal(dataCall.request.headers?.accept, 'application/json');
+});
+
+test('the path a tool advertises is the path the client requests', async () => {
+  // These were two assertions with nothing tying them together: one test checked
+  // the template the tool descriptions print, another checked the URL that goes
+  // out. A route change would have moved them apart in silence. The request now
+  // comes from the registry's own grammar, so this asserts the link itself.
+  const { client, transport } = makeClient([
+    tokenBody('t'),
+    { status: 200, body: JSON.stringify({ data: { vin: VIN } }) },
+  ]);
+  await client.domain(VIN, 'charging', 'target-soc');
+
+  const advertised = domainPath('charging', 'target-soc');
+  assert.equal(advertised, '/v1/vehicles/{vin}/charging/target-soc', 'the template a tool description prints');
+  assert.equal(
+    transport.calls[1]!.url,
+    `${BASE}${advertised.replace('{vin}', VIN)}`,
+    'the requested path is that same template with the VIN filled in',
+  );
+});
+
+test('a VIN that needs escaping is escaped, so it cannot add a path segment', async () => {
+  // The payload carries no vin of its own, so the identity check has nothing to
+  // compare: this test is about the path, not about that rule.
+  const { client, transport } = makeClient([
+    tokenBody('t'),
+    { status: 200, body: JSON.stringify({ data: { batteryChargeLevelPercentage: 52 } }) },
+  ]);
+  await client.domain('a/b', 'telemetry', 'battery');
+  assert.equal(transport.calls[1]!.url, `${BASE}${domainRequestPath('a/b', 'telemetry', 'battery')}`);
+  assert.ok(transport.calls[1]!.url.includes('a%2Fb'), 'the VIN is percent-encoded');
+});
+
+test('a successful read hands the recorder the unwrapped payload and its change id', async () => {
+  // The history recorder was handed the raw body by the cache and reached into
+  // `body.data.metaEventId` itself, so an Envelope concept lived inside the
+  // Transport that merely carried it. The client opens the Envelope, so the client
+  // reports what it found.
+  const seen: DomainObservation[] = [];
+  const { client } = makeClient(
+    [
+      tokenBody('t'),
+      {
+        status: 200,
+        body: JSON.stringify({
+          data: { vin: VIN, metaEventId: 'e7', batteryChargeLevelPercentage: 52 },
+          meta: { domain: 'battery', vin: VIN },
+        }),
+      },
+    ],
+    { onDomainRead: (o) => seen.push(o) },
+  );
+  const data = await client.domain(VIN, 'telemetry', 'battery');
+
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0], {
+    vin: VIN,
+    kind: 'telemetry',
+    name: 'battery',
+    data: { vin: VIN, metaEventId: 'e7', batteryChargeLevelPercentage: 52 },
+    metaEventId: 'e7',
+  });
+  assert.equal(seen[0]!.data, data, 'and it is the very object the caller was handed, not a copy');
+});
+
+test('a payload with no change id, and a Domain that has no data, are recorded apart', async () => {
+  const seen: DomainObservation[] = [];
+  const { client } = makeClient(
+    [
+      tokenBody('t'),
+      { status: 200, body: JSON.stringify({ data: { vin: VIN } }) },
+      { status: 404, body: JSON.stringify({ error: { code: 'DATA_NOT_AVAILABLE', message: 'no data' } }) },
+      { status: 200, body: JSON.stringify({ meta: { domain: 'odometer', vin: VIN } }) },
+    ],
+    { onDomainRead: (o) => seen.push(o) },
+  );
+  await client.domain(VIN, 'telemetry', 'battery');
+  assert.equal(seen[0]!.metaEventId, undefined, 'a payload without a change id reports none');
+
+  const missing = await client.domain(VIN, 'telemetry', 'health');
+  assert.equal(missing, null);
+  assert.equal(seen.length, 1, 'an absent Domain is not an observation');
+
+  // An Envelope that carries no `data` at all is not one either. It is a read that
+  // produced nothing to record, and a recorder that ran on it would be reading
+  // metaEventId off undefined.
+  const empty = await client.domain(VIN, 'telemetry', 'odometer');
+  assert.equal(empty, null);
+  assert.equal(seen.length, 1, 'a payload-less Envelope is not an observation either');
 });
 
 test('sends x-delegated-account-id when third-party delegation is configured', async () => {

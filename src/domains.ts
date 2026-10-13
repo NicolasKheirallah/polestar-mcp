@@ -339,9 +339,24 @@ export const DOMAINS: readonly DomainSpec[] = [
   },
 ] as const;
 
+/** The route that lists the VINs a credential may see. */
+export const VEHICLES_PATH = '/v1/vehicles';
+
 /** The upstream route for one Domain, the single spelling of the path grammar. */
 export function domainPath(kind: DomainKind, name: string): string {
-  return `/v1/vehicles/{vin}/${kind}/${name}`;
+  return `${VEHICLES_PATH}/{vin}/${kind}/${name}`;
+}
+
+/**
+ * That same route with a real VIN in it, which is what the client actually
+ * requests. The path used to be built by hand in the client while this module
+ * advertised a template only prose and one test ever read, so a route change
+ * would have moved the advertised endpoint and the request apart with nothing
+ * failing: two tests, one URL, no link between them. One string, one
+ * substitution.
+ */
+export function domainRequestPath(vin: string, kind: DomainKind, name: string): string {
+  return domainPath(kind, name).replace('{vin}', encodeURIComponent(vin));
 }
 
 export function toolName(domain: DomainSpec): string {

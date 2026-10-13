@@ -10,12 +10,15 @@ Each `get_*` tool wraps exactly one GET endpoint of the Polestar Data Portal M2M
 
 The 15 domain tools (one for each of the 15 read domains of the v1 API) are table-driven: one `DOMAINS` entry per read domain, from which the tool name, registration, scope collection, and resource URIs all derive. The aggregate, advisor, system, and history tools are hand-registered in their own modules and read the same data through the client (so they share the cache and the daily budget).
 
-Two arguments are shared by most tools:
+Three arguments are shared by most tools:
 
 | Argument | Type | Meaning |
 | --- | --- | --- |
 | `vin` | string, optional | The Vehicle Identification Number, case-insensitive. Omit it on a credential with exactly one car and that car is used; with several cars the tool asks you to pick (from `list_vehicles`) |
 | `raw` | boolean, optional | Domain tools only: append the untouched API payload after the humanized summary |
+| `delegated_account_id` | string, optional | Third-party credentials only: read the shared vehicles of this account for this call. Refused with `DELEGATION_NOT_ALLOWED` unless the operator listed it in `POLESTAR_DELEGATED_ACCOUNT_IDS` |
+
+Every tool that reads a car takes the first and the last of these, including the aggregates, the advisor and the history tools: a tool that reads a car on a fleet credential has to be able to say which account it is reading.
 
 All tools return text content. Domain reads answer with a short humanized summary plus a data age ("data observed 5 min ago"); the raw JSON is one `raw: true` away.
 
@@ -115,7 +118,12 @@ A Polestar reports each domain independently, and "not reported" is a normal sta
 
 ```text
 No is-at-charge-location data is available for vehicle YSMTEST22PL000001
-(the API returned DATA_NOT_AVAILABLE: this vehicle does not report this domain).
+(the API returned DATA_NOT_AVAILABLE, this vehicle does not report this domain).
 ```
+
+Every tool that reads a domain states the absence this way, so the same car
+missing the same domain reads the same whether it was asked for through a
+`get_*` tool, an aggregate, or a `polestar://` resource. A tool whose consequence
+is worth naming adds one sentence after it, as `get_charging_estimate` does.
 
 Your assistant will read that sentence and can tell you the car does not report the topic. This is why asking "is my car at a charging station?" sometimes has no answer: it depends on whether that car reports the domain at all.

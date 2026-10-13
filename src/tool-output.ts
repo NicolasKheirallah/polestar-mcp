@@ -1,7 +1,6 @@
 import { z } from 'zod';
-import { acceptedContent } from '@modelcontextprotocol/server';
-import { PolestarApiError, type DomainKind, type PolestarClient } from './client.js';
-import { formatAge, maskVin, observedAtMs, summarizeDomain, vinLabel, type Units } from './format.js';
+import type { PolestarClient } from './client.js';
+import type { Units } from './format.js';
 import { describeFailure, toFailure, type MintedCode } from './failure.js';
 
 export const vinArg = {
@@ -13,15 +12,22 @@ export const vinArg = {
     ),
 };
 
-/** The arguments a tool that reads one Vehicle accepts. */
+/**
+ * The arguments a tool that reads one Vehicle accepts.
+ *
+ * A tool that reads a car takes a VIN and a delegation, or it is a tool that only
+ * looks like one. `delegated_account_id` used to be declared by the 15 Domain tools
+ * alone, so a fleet operator could delegate `get_battery` but not `get_car_status`,
+ * and the argument was silently dropped by the SDK rather than refused.
+ */
 export interface VinArgs {
   vin?: string;
+  delegated_account_id?: string;
 }
 
-/** A domain read: the Vehicle, whether to include the raw payload, and an optional delegation. */
+/** A domain read: the Vehicle, and whether to include the raw payload. */
 export interface ReadArgs extends VinArgs {
   raw?: boolean;
-  delegated_account_id?: string;
 }
 
 export const rawArg = {
@@ -132,23 +138,9 @@ const UPSTREAM_HINTS: Record<string, string> = {
   UNAUTHORIZED: 'Credential rejected even after a fresh token; it may have been revoked or rotated.',
 };
 
-/**
- * Applies a caller-supplied delegated account, refusing anything outside the
- * operator's allowlist. The check lives here because the gateway answers 200 for
- * an unknown `x-delegated-account-id` rather than rejecting it: an unvalidated
- * argument would quietly serve a different account's vehicles and look like an
- * ordinary result.
- */
-export function clientFor(deps: ToolDeps, delegatedAccountId: string | undefined): PolestarClient {
-  if (delegatedAccountId === undefined || delegatedAccountId === '') return deps.client;
-  if (!deps.delegatedAccounts.includes(delegatedAccountId)) {
-    throw new PolestarApiError(
-      'DELEGATION_NOT_ALLOWED',
-      `delegated_account_id ${JSON.stringify(delegatedAccountId)} is not in POLESTAR_DELEGATED_ACCOUNT_IDS, so it was not sent.`,
-      403,
-    );
-  }
-  return deps.client.forDelegation(delegatedAccountId);
+/** The text of a result, for a surface that can send nothing else (MCP resources). */
+export function resultText(result: ToolResult): string {
+  return result.content.map((c) => c.text).join('\n');
 }
 
 /** One text rendering of a failure, shared by tools and by the resource surface. */
@@ -199,126 +191,3 @@ export type ToolContext = {
     inputResponses?: Record<string, unknown>;
   };
 };
-
-/**
- * Resolve which vehicle a call is about. One vehicle is implicit; none is an
- * error; several used to be an error too, which pushed the model to go fetch a
- * VIN list and retry. With the 2026-07-28 multi-round-trip flow the server can
- * instead ask the client to pick, and continue on the retry with the answer 
- * `elicitInput()` is deprecated and throws on this protocol revision.
- */
-export async function resolveVinOrAsk(
-  deps: ToolDeps,
-  ctx: ToolContext | undefined,
-  vinInput: string | undefined,
-  requestKey: string,
-): Promise<{ vin: string }> {
-  try {
-    return { vin: await deps.client.resolveVin(vinInput) };
-  } catch (err) {
-    const ambiguous = (err as PolestarApiError)?.code === 'AMBIGUOUS_VIN';
-    if (!ambiguous || ctx?.mcpReq?.elicitInput === undefined) throw err;
-    const answer = acceptedContent<{ vin?: string }>(ctx.mcpReq.inputResponses, requestKey);
-    if (answer?.vin !== undefined) {
-      // Client input is untrusted: resolveVin still validates it.
-      return { vin: await deps.client.resolveVin(answer.vin) };
-    }
-    const vins = await deps.client.vehicles();
-    let elicited: { action?: string; content?: Record<string, unknown> } | undefined;
-    try {
-      elicited = await ctx.mcpReq.elicitInput({
-        message: `This credential can see ${vins.length} vehicles. Which one?`,
-        requestedSchema: {
-          type: 'object',
-          properties: { vin: { type: 'string', enum: vins, description: 'Choose the vehicle to read.' } },
-          required: ['vin'],
-        },
-      });
-    } catch {
-      // The client never declared the elicitation capability (or is on a
-      // protocol revision without this channel). Fall back to the same
-      // actionable error an un-askable caller would want, rather than
-      // surfacing a protocol refusal.
-      throw err;
-    }
-    const chosen = elicited?.action === 'accept' ? elicited.content?.vin : undefined;
-    if (typeof chosen === 'string') return { vin: await deps.client.resolveVin(chosen) };
-    throw new PolestarApiError(
-      'VIN_NOT_CHOSEN',
-      `No vehicle was chosen. This credential can see: ${vins.join(', ')}`,
-      400,
-    );
-  }
-}
-
-/** The slice of a registry row a domain read needs. `DomainSpec` satisfies it. */
-export interface DomainReader {
-  kind: DomainKind;
-  name: string;
-  scope: string;
-}
-
-/**
- * One domain read, rendered for an agent: a humanized summary plus data age, with
- * the untouched API payload appended when `raw` is requested. A 403 gains a scope
- * hint because the M2M credential is scoped per domain and the raw message never
- * says which scope was missing.
- *
- * The Domain arrives as the registry row rather than as three loose strings: with
- * the positional form a caller could transpose `kind`, `name` and `scope` and
- * still type-check.
- */
-export async function readDomainFormatted(
-  deps: ToolDeps,
-  domain: DomainReader,
-  args: ReadArgs,
-  ctx: ToolContext,
-): Promise<ToolResult> {
-  const { vin: vinInput, raw, delegated_account_id: delegatedAccountId } = args;
-  const { kind, name, scope } = domain;
-  try {
-    // One client for the whole call: the delegated identity is resolved once and
-    // every request after it goes out under that identity. Holding `deps.client`
-    // and a separate `active` in the same scope is how a read silently escaped
-    // the delegation.
-    const scoped: ToolDeps = { ...deps, client: clientFor(deps, delegatedAccountId) };
-    const picked = await resolveVinOrAsk(scoped, ctx, vinInput, `pick-vehicle-${name}`);
-    const vin = picked.vin;
-    const data = await scoped.client.domain(vin, kind, name);
-    const label = vinLabel(vin, deps.redactVin, deps.vehicleLabels);
-
-    if (data === null) {
-      return text(
-        `No ${name} data is available for vehicle ${label} (the API returned DATA_NOT_AVAILABLE, this vehicle does not report this domain).`,
-      );
-    }
-
-    const nowMs = deps.nowMs?.() ?? Date.now();
-    const observed = observedAtMs(data);
-    const age = observed !== undefined ? `data observed ${formatAge(observed, nowMs)}` : 'freshness unknown';
-    const header = `Vehicle ${label}, ${kind}/${name} (${age})`;
-
-    const summaryLines = summarizeDomain(name, data, deps.units);
-    const sections = [header];
-    if (summaryLines !== null) sections.push(...summaryLines);
-    const includeRaw = raw === true || summaryLines === null;
-    if (includeRaw) {
-      sections.push('', 'Raw payload:', JSON.stringify(data, null, 2));
-    }
-    // structuredContent mirrors what the text carries: putting the whole payload
-    // in the envelope as well would quietly re-add the tokens that the compact
-    // summary exists to save, since clients forward structure to the model too.
-    return text(sections.join('\n'), {
-      // The envelope goes to the model alongside the text, so it must obey
-      // POLESTAR_REDACT_VIN too; masking only the prose left the identifier in
-      // the machine-readable half of the same result.
-      vin: maskVin(vin, deps.redactVin),
-      tool: `get_${name.replace(/-/g, '_')}`,
-      ...(observed !== undefined ? { ageSeconds: Math.max(0, Math.round((nowMs - observed) / 1000)) } : {}),
-      ...(includeRaw ? { data } : {}),
-    });
-  } catch (err) {
-    return errorResult(err, (err as PolestarApiError)?.httpStatus === 403 ? `this domain needs the OAuth scope \`${scope}\` on the credential` : undefined);
-  }
-}
-

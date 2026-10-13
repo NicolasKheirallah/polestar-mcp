@@ -11,8 +11,11 @@ export interface SystemDeps extends ToolDeps {
   /** Epoch ms when the current access token stops being trusted. */
   tokenExpiresAt: () => number | undefined;
   fixtureMode: boolean;
-  /** Human-readable background-sampling state; undefined when history is off. */
-  samplerState?: () => string | undefined;
+  /**
+   * The background sampler, when history is on. It describes itself: it holds the
+   * cadence it actually runs at and the guard it actually uses.
+   */
+  sampler?: { describe(): string } | undefined;
 }
 
 /**
@@ -40,8 +43,7 @@ export function systemToolSpecs(deps: SystemDeps): ToolSpec[] {
         ];
         // Sampling spends the same daily budget as an agent's questions, so an
         // operator has to be able to see it is happening without reading stderr.
-        const sampling = deps.samplerState?.();
-        if (sampling !== undefined) lines.push(`Background sampling: ${sampling}`);
+        if (deps.sampler !== undefined) lines.push(`Background sampling: ${deps.sampler.describe()}`);
         if (cache !== undefined) {
           const totalReads = cache.hits + cache.staleServed + cache.misses;
           const hitRate = totalReads === 0 ? 0 : Math.round(((cache.hits + cache.staleServed) / totalReads) * 100);

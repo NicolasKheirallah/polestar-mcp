@@ -1,5 +1,6 @@
 import { mkdirSync, appendFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { batteryView, isChargingStatus } from './domain-data.js';
 
 const MAX_HISTORY_FILE_BYTES = 64 * 1024 * 1024;
 
@@ -148,15 +149,15 @@ export function extractChargingSessions(samples: HistoryRecord[], gapMs = 30 * 6
   }
   const parsed: Sample[] = [];
   for (const record of samples) {
-    const d = record.data as Record<string, unknown> | null;
-    if (!d || typeof d !== 'object') continue;
-    const power = typeof d.chargingPowerWatts === 'number' ? d.chargingPowerWatts : 0;
-    const status = typeof d.chargingStatusV2 === 'string' ? d.chargingStatusV2 : '';
-    // endsWith, not includes: 'CHARGING_STATUS_V2_IDLE' contains "CHARGING"
-    // as a substring of the enum namespace.
-    const charging = power > 0 || status.endsWith('_CHARGING');
-    const level = typeof d.batteryChargeLevelPercentage === 'number' ? d.batteryChargeLevelPercentage : undefined;
-    parsed.push({ at: record.observedAt, power, charging, level });
+    const stored = record.data;
+    if (stored === null || typeof stored !== 'object') continue;
+    const view = batteryView(stored as Record<string, unknown>);
+    const power = view.powerWatts ?? 0;
+    // The enum rule belongs to the payload reader, not to this loop: endsWith,
+    // not includes, because 'CHARGING_STATUS_V2_IDLE' contains "CHARGING" as a
+    // substring of the enum namespace.
+    const charging = power > 0 || isChargingStatus(view.status);
+    parsed.push({ at: record.observedAt, power, charging, level: view.chargeLevelPct });
   }
   parsed.sort((a, b) => a.at - b.at);
 
@@ -203,12 +204,13 @@ export function extractChargingSessions(samples: HistoryRecord[], gapMs = 30 * 6
 export function degradationSeries(samples: HistoryRecord[]): DegradationPoint[] {
   const points: DegradationPoint[] = [];
   for (const record of samples) {
-    const d = record.data as Record<string, unknown> | null;
-    if (!d) continue;
-    const soc = d.batteryChargeLevelPercentage;
-    if (typeof soc !== 'number' || soc <= 5) continue; // low-SoC range estimates are noisy
-    const range = typeof d.estimatedDistanceToEmptyKm === 'number' ? d.estimatedDistanceToEmptyKm : undefined;
-    const energyAvailable = (d.dischargeInfo as { energyAvailable?: unknown } | undefined)?.energyAvailable;
+    const stored = record.data;
+    if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) continue;
+    const view = batteryView(stored as Record<string, unknown>);
+    const soc = view.chargeLevelPct;
+    if (soc === undefined || soc <= 5) continue; // low-SoC range estimates are noisy
+    const range = view.distanceToEmptyKm;
+    const energyAvailable = view.energyAvailableKwh;
     points.push({
       observedAt: record.observedAt,
       socPct: soc,
@@ -218,7 +220,7 @@ export function degradationSeries(samples: HistoryRecord[]): DegradationPoint[] 
             impliedFullRangeKm: Math.round((range / soc) * 100),
           }
         : {}),
-      ...(typeof energyAvailable === 'number' && energyAvailable > 0
+      ...(energyAvailable !== undefined && energyAvailable > 0
         ? { impliedCapacityKwh: Math.round((energyAvailable / soc) * 100 * 10) / 10 }
         : {}),
     });

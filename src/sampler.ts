@@ -24,6 +24,9 @@ export class HistorySampler {
   private timer: NodeJS.Timeout | undefined;
   private running = false;
   private stopped = false;
+  /** Whether start() was ever called, and how many Vehicles it took on. */
+  private started = false;
+  private targetCount = 0;
 
   private readonly intervalMs: number;
   private readonly budgetGuardFraction: number;
@@ -46,7 +49,9 @@ export class HistorySampler {
    */
   async start(vins?: string[]): Promise<number> {
     if (this.timer !== undefined) return 0;
+    this.started = true;
     const targets = vins ?? (await this.client.vehicles().catch(() => [] as string[]));
+    this.targetCount = targets.length;
     if (targets.length === 0) return 0;
     const tickVins = targets;
     const tick = async (): Promise<void> => {
@@ -91,6 +96,23 @@ export class HistorySampler {
       clearTimeout(this.timer);
       this.timer = undefined;
     }
+  }
+
+  /**
+   * What this sampler is doing, and how it is configured, in one line.
+   *
+   * It answers rather than being described from outside. server.ts used to compose
+   * this sentence out of the environment beside it, which restated the cadence
+   * clamp and the 80% guard instead of reading them: an overridden
+   * budgetGuardFraction was still reported as 80%, and no test on either side could
+   * see the difference.
+   */
+  describe(): string {
+    if (!this.started) return 'off, history records only what tool calls read (enable with POLESTAR_SAMPLE=on)';
+    if (this.targetCount === 0) return 'on, but this credential reports no vehicle to sample';
+    const every = Math.round(this.intervalMs / 1000);
+    const guard = Math.round(this.budgetGuardFraction * 100);
+    return `on, every ${every}s, stands down at ${guard}% of the daily budget`;
   }
 }
 

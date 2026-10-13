@@ -161,3 +161,137 @@ export function epochSecondsMs(value: unknown): number | undefined {
   if (typeof seconds !== 'string' || !/^\d+$/.test(seconds)) return undefined;
   return Number(seconds) * 1000;
 }
+
+/*
+ * Whole-payload views.
+ *
+ * The readers above are one field each, which is the right shape for a value
+ * that nests (targetSoc.batteryChargeTargetLevel, dischargeInfo.energyAvailable).
+ * For a payload several consumers read end to end it is the wrong shape: a
+ * consumer that reads six fields indexes the payload six times, and a rule about
+ * the payload gets written once per consumer. A view is one call for the whole
+ * Domain, so the field names and the rules that rest on them have one home.
+ */
+
+/**
+ * Whether a charging status means the car is taking power. `endsWith`, not
+ * `includes`: `CHARGING_STATUS_V2_IDLE` contains "CHARGING" as part of the enum
+ * namespace, so a substring test reports every parked car as charging.
+ */
+export function isChargingStatus(status: unknown): boolean {
+  return typeof status === 'string' && status.endsWith('_CHARGING');
+}
+
+export interface BatteryView {
+  chargeLevelPct?: number | undefined;
+  distanceToEmptyKm?: number | undefined;
+  powerWatts?: number | undefined;
+  volts?: number | undefined;
+  /** Reported only by some credentials; `undefined` means unreported, not zero. */
+  amps?: number | undefined;
+  consumptionKwhPer100Km?: number | undefined;
+  timeToFullMinutes?: number | undefined;
+  energyAvailableKwh?: number | undefined;
+  /** `chargingStatusV2` supersedes V1 and a car reports one or the other. */
+  status: unknown;
+  connection: unknown;
+}
+
+export function batteryView(data: Payload): BatteryView {
+  const battery = asRecord(data) ?? {};
+  const out: BatteryView = {
+    status: battery.chargingStatusV2 ?? battery.chargingStatus,
+    connection: battery.chargerConnectionStatus,
+  };
+  const chargeLevelPctValue = chargeLevelPct(data);
+  const distanceToEmptyKmValue = distanceToEmptyKm(data);
+  const powerWatts = chargingPowerWatts(data);
+  const volts = chargingVoltageVolts(data);
+  const amps = asNumber(battery.chargingCurrentAmps);
+  const consumptionKwhPer100Km = asNumber(battery.averageEnergyConsumptionKwhPer100Km);
+  const timeToFull = timeToFullMinutes(data);
+  const energy = energyAvailableKwh(data);
+  if (chargeLevelPctValue !== undefined) out.chargeLevelPct = chargeLevelPctValue;
+  if (distanceToEmptyKmValue !== undefined) out.distanceToEmptyKm = distanceToEmptyKmValue;
+  if (powerWatts !== undefined) out.powerWatts = powerWatts;
+  if (volts !== undefined) out.volts = volts;
+  if (amps !== undefined) out.amps = amps;
+  if (consumptionKwhPer100Km !== undefined) out.consumptionKwhPer100Km = consumptionKwhPer100Km;
+  if (timeToFull !== undefined) out.timeToFullMinutes = timeToFull;
+  if (energy !== undefined) out.energyAvailableKwh = energy;
+  return out;
+}
+
+const OPEN_STATUS_OPEN = 'OPEN_STATUS_OPEN';
+const LOCK_STATUS_LOCKED = 'LOCK_STATUS_LOCKED';
+
+/** `frontLeftWindow` reads as "front left window": the payload's names are camelCase. */
+const spokenFieldName = (key: string): string => key.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+
+function openFields(record: Record<string, unknown>, include: (key: string) => boolean): string[] {
+  const out: string[] = [];
+  for (const [key, value] of Object.entries(record)) {
+    if (value !== OPEN_STATUS_OPEN || !include(key)) continue;
+    out.push(spokenFieldName(key));
+  }
+  return out;
+}
+
+export interface ExteriorView {
+  /** Every exterior field the car reports open, the charge flap included. */
+  open: string[];
+  /**
+   * The open fields that bear on the car being shut and locked.
+   *
+   * The tank lid is deliberately not one of them: a charge flap left open is a
+   * fact worth reporting and is not a lock failure, so `is_car_secure` and
+   * `get_car_status` ask two different questions. They ask them from these two
+   * fields rather than from two filters written independently, which is how the
+   * exclusion was one silent `key !== 'tankLid'` in one tool and absent from the
+   * other.
+   */
+  openSecurityRelevant: string[];
+  /** Central lock and tailgate lock both engaged. */
+  locked: boolean;
+  /** The raw lock status, for the label a summary prints. */
+  centralLock: unknown;
+  alarm: unknown;
+}
+
+export function exteriorView(data: Payload): ExteriorView {
+  const exterior = asRecord(data) ?? {};
+  return {
+    open: openFields(exterior, () => true),
+    openSecurityRelevant: openFields(exterior, (key) => key !== 'tankLid'),
+    locked: exterior.centralLock === LOCK_STATUS_LOCKED && exterior.tailgateLock === LOCK_STATUS_LOCKED,
+    centralLock: exterior.centralLock,
+    alarm: exterior.alarm,
+  };
+}
+
+export interface HealthView {
+  daysToService?: number | undefined;
+  distanceToServiceKm?: number | undefined;
+}
+
+/** Service countdown for whichever of the two limits the car reports first. */
+export function healthView(data: Payload): HealthView {
+  const health = asRecord(data) ?? {};
+  const out: HealthView = {};
+  const days = asNumber(health.daysToService);
+  const distanceToService = asNumber(health.distanceToServiceKm);
+  if (days !== undefined) out.daysToService = days;
+  if (distanceToService !== undefined) out.distanceToServiceKm = distanceToService;
+  return out;
+}
+
+export interface AvailabilityView {
+  /** Whether the car is reachable or asleep. */
+  status: unknown;
+  usageMode: unknown;
+}
+
+export function availabilityView(data: Payload): AvailabilityView {
+  const availability = asRecord(data) ?? {};
+  return { status: availability.availabilityStatus, usageMode: availability.usageMode };
+}

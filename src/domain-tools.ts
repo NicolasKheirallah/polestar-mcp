@@ -2,7 +2,8 @@
  * The Domain tools: one humanized read per registry entry, plus discovery.
  * The registry itself is in domains.ts; this module turns it into callable specs.
  */
-import { delegatedAccountArg, errorResult, rawArg, readDomainFormatted, text, vinArg, type ReadArgs, type ToolDeps } from './tool-output.js';
+import { delegatedAccountArg, errorResult, rawArg, text, vinArg, type ReadArgs, type ToolDeps } from './tool-output.js';
+import { readDomainFormatted } from './vehicle-read.js';
 import { maskVin } from './format.js';
 import { DOMAINS, domainPath, toolName } from './domains.js';
 import type { ToolSpec } from './tools.js';

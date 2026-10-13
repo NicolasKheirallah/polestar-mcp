@@ -5,7 +5,8 @@ import {
   HistoryStore,
   type HistoryRecord,
 } from './history.js';
-import { errorResult, text, vinArg, type ToolDeps, type VinArgs } from './tool-output.js';
+import { delegatedAccountArg, errorResult, text, vinArg, type ToolDeps, type VinArgs } from './tool-output.js';
+import { vehicleFor } from './vehicle-read.js';
 import type { ToolSpec } from './tools.js';
 
 /** get_history names the Domain to read, as `kind/name`. */
@@ -19,6 +20,7 @@ export interface HistoryDeps extends ToolDeps {
 
 const historyArgs = {
   ...vinArg,
+  ...delegatedAccountArg,
   domain: z.string().describe('Domain as kind/name, e.g. "telemetry/battery".'),
   hours: z.number().positive().optional().describe('Only records newer than this many hours.'),
   limit: z.number().int().positive().optional().describe('Max records to return (default 200).'),
@@ -26,6 +28,7 @@ const historyArgs = {
 
 const sinceArgs = {
   ...vinArg,
+  ...delegatedAccountArg,
   days: z.number().positive().optional().describe('Only consider the last N days.'),
 };
 
@@ -49,9 +52,11 @@ export function historyToolSpecs(deps: HistoryDeps): ToolSpec[] {
         'Raw recorded samples for one domain from the local history store (requires history to be enabled on the server). Returns one line per change, newest first.',
     args: historyArgs,
     annotations: { readOnlyHint: true },
-    run: async (args: HistoryArgs) => {
+    run: async (args: HistoryArgs, ctx) => {
       try {
-        const vin = await deps.client.resolveVin(args?.vin);
+        const found = await vehicleFor(deps, ctx, args ?? {}, 'pick-vehicle-history');
+        if (!found.ok) return found.result;
+        const vin = found.vehicle.vin;
         const parsed = /(\w+)\/([\w-]+)/.exec(args?.domain ?? '');
         const kind = (parsed?.[1] ?? 'telemetry') as 'telemetry' | 'charging';
         const name = parsed?.[2] ?? args?.domain;
@@ -77,9 +82,11 @@ export function historyToolSpecs(deps: HistoryDeps): ToolSpec[] {
         'Trend of the battery\'s implied full-charge range and implied pack capacity over recorded history (range/SoC and dischargeInfo.energyAvailable/SoC). Estimates, not verdicts, range depends on conditions. Requires history.',
     args: sinceArgs,
     annotations: { readOnlyHint: true },
-    run: async (args: SinceArgs) => {
+    run: async (args: SinceArgs, ctx) => {
       try {
-        const vin = await deps.client.resolveVin(args?.vin);
+        const found = await vehicleFor(deps, ctx, args ?? {}, 'pick-vehicle-degradation');
+        if (!found.ok) return found.result;
+        const vin = found.vehicle.vin;
         const sinceMs = args?.days !== undefined ? Date.now() - args.days * 86_400_000 : undefined;
         const samples = deps.store.batteryChronological(vin, sinceMs);
         if (samples.length < 5) {
@@ -121,9 +128,11 @@ export function historyToolSpecs(deps: HistoryDeps): ToolSpec[] {
         'Reconstructed AC/DC charging sessions from recorded battery samples: start, duration, peak power, max SoC reached. Requires history with battery sampling.',
     args: sinceArgs,
     annotations: { readOnlyHint: true },
-    run: async (args: SinceArgs) => {
+    run: async (args: SinceArgs, ctx) => {
       try {
-        const vin = await deps.client.resolveVin(args?.vin);
+        const found = await vehicleFor(deps, ctx, args ?? {}, 'pick-vehicle-sessions');
+        if (!found.ok) return found.result;
+        const vin = found.vehicle.vin;
         const sinceMs = args?.days !== undefined ? Date.now() - args.days * 86_400_000 : undefined;
         const samples = deps.store.batteryChronological(vin, sinceMs);
         const sessions = extractChargingSessions(samples);

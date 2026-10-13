@@ -23,13 +23,14 @@ polestar-mcp/
     advisor-tools.ts     plan_cheapest_charge (prices in, schedule out)
     system-tools.ts      polestar_status (budget, cache, token)
     history-tools.ts     history/degradation/sessions (opt-in)
-    tool-output.ts       shared plumbing: vin/raw args, 403 scope hint
+    tool-output.ts       the result envelope: vin/raw args, text, errorResult
+    vehicle-read.ts      which Vehicle, which Domains: resolve, reads, DATA_NOT_AVAILABLE
     format.ts            humanizer: enum labels, units, ages, summaries
     planner.ts           cheapest-hours arithmetic for the advisor
     history.ts           JSONL store, sessions, degradation series
     sampler.ts           optional background sampler, budget guard
     budget.ts            fail-closed daily-call meter
-    caching-transport.ts TTLs, stale-while-revalidate, history hook
+    caching-transport.ts TTLs, stale-while-revalidate, stats
     retrying-transport.ts 429/502/503, Retry-After, backoff
     transport.ts         the seam: HttpTransport, FixtureTransport
   test/
@@ -81,7 +82,7 @@ The suites run through a `ScriptedTransport` that hands out pre-written response
 
 `scripts/stdio-client.ts` is a minimal MCP client: it spawns the server as a child process, speaks newline-delimited JSON-RPC on stdio, and offers typed helpers for the handshake, `tools/list`, `tools/call`, and resource reads. Both stdio test scripts are built on it.
 
-`npm run smoke` starts the server in fixture mode against the sanitized test fixtures and asserts, in order: the handshake completes with the expected server name, the tool registry is complete (every domain tool plus the aggregate, advisor, system, and history tools), tools carry their `readOnlyHint` annotations, the optional-vin resolution works, `get_car_status` produces a humanized briefing, resources list and read, the three prompts exist, the history recorder feeds `get_history`, a `DATA_NOT_AVAILABLE` domain degrades into a plain sentence, and an unknown tool is rejected cleanly. Only after every assertion does it print `SMOKE_OK`.
+`npm run smoke` starts the server in fixture mode against the sanitized test fixtures and asserts, in order: the handshake completes with the expected server name, the tool registry is complete (every domain tool plus the aggregate, advisor, system, and history tools), tools carry their `readOnlyHint` annotations, the optional-vin resolution works, `get_car_status` produces a humanized briefing, resources list and read (asserting the resource carries the same header, age included, as the `get_*` tool for that Domain), the three prompts exist, the history recorder feeds `get_history`, a `DATA_NOT_AVAILABLE` domain degrades into a plain sentence, and an unknown tool is rejected cleanly. Only after every assertion does it print `SMOKE_OK`.
 
 `npm run smoke-http` starts the server with `POLESTAR_HTTP_PORT` set and speaks plain JSON-RPC over HTTP POSTs (stateless mode): handshake, tool registry, a `get_battery` call, and a resource read. It prints `HTTP_SMOKE_OK`.
 

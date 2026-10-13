@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { extractChargingSessions, degradationSeries, HistoryStore } from '../src/history.js';
+import { batteryView, exteriorView, isChargingStatus } from '../src/domain-data.js';
 import { humanizeEnum, summarizeDomain, formatAge } from '../src/format.js';
 import { planCheapestCharge } from '../src/planner.js';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -186,4 +187,67 @@ test('degradation series derives implied full range and capacity', () => {
   assert.equal(points.length, 1);
   assert.equal(points[0]!.impliedFullRangeKm, 340);
   assert.equal(points[0]!.impliedCapacityKwh, 68);
+});
+
+test('a charging status is only active when it ends in _CHARGING', () => {
+  // The enum namespace contains the word, so a substring test would call every
+  // parked car charging. extractChargingSessions reads this rule through the
+  // payload reader now rather than re-deriving it in its own loop.
+  assert.equal(isChargingStatus('CHARGING_STATUS_V2_CHARGING'), true);
+  assert.equal(isChargingStatus('CHARGING_STATUS_CHARGING'), true);
+  assert.equal(isChargingStatus('CHARGING_STATUS_V2_IDLE'), false);
+  assert.equal(isChargingStatus(undefined), false);
+});
+
+test('the exterior questions are stated once, and a charge flap is not a lock failure', () => {
+  // The openness rule used to be written three times: a named list in the
+  // humanizer, a bare count in get_car_status, and a count carrying a silent
+  // `key !== 'tankLid'` exclusion in is_car_secure. The two tools ask genuinely
+  // different questions, so both answers are fields of one view instead of two
+  // filters written independently.
+  const flapOpen = {
+    centralLock: 'LOCK_STATUS_LOCKED',
+    tailgateLock: 'LOCK_STATUS_LOCKED',
+    tankLid: 'OPEN_STATUS_OPEN',
+    frontLeftDoor: 'OPEN_STATUS_CLOSED',
+    alarm: 'ALARM_STATUS_OK',
+  };
+  const seen = exteriorView(flapOpen);
+  assert.deepEqual(seen.open, ['tank lid'], 'the charge flap is an open item, named the way a summary prints it');
+  assert.deepEqual(seen.openSecurityRelevant, [], 'it is not a lock failure');
+  assert.equal(seen.locked, true);
+
+  const doorOpen = { ...flapOpen, frontLeftDoor: 'OPEN_STATUS_OPEN' };
+  assert.deepEqual(exteriorView(doorOpen).open, ['tank lid', 'front left door']);
+  assert.deepEqual(exteriorView(doorOpen).openSecurityRelevant, ['front left door'], 'a door is both');
+
+  assert.equal(
+    exteriorView({ ...flapOpen, tailgateLock: 'LOCK_STATUS_UNLOCKED' }).locked,
+    false,
+    'both locks have to be engaged for the car to count as locked',
+  );
+});
+
+test('the battery view reads a field the single-field readers do not cover', () => {
+  // The view exists so a consumer stops indexing the payload. It has to keep
+  // answering for a payload that reports nothing, which is the common case for
+  // the optional fields.
+  const empty = batteryView(null);
+  assert.equal(empty.chargeLevelPct, undefined);
+  assert.equal(empty.powerWatts, undefined, 'unreported is undefined, never zero');
+
+  const seen = batteryView({
+    batteryChargeLevelPercentage: 61,
+    chargingStatus: 'CHARGING_STATUS_IDLE',
+    chargingStatusV2: 'CHARGING_STATUS_V2_CHARGING',
+    chargingCurrentAmps: 16,
+    chargingVoltageVolts: 232,
+    averageEnergyConsumptionKwhPer100Km: 17.4,
+  });
+  assert.equal(seen.chargeLevelPct, 61);
+  assert.equal(seen.status, 'CHARGING_STATUS_V2_CHARGING', 'V2 supersedes V1 when a car reports both');
+  assert.equal(seen.amps, 16);
+  assert.equal(seen.volts, 232);
+  assert.equal(seen.consumptionKwhPer100Km, 17.4);
+  assert.equal(seen.distanceToEmptyKm, undefined);
 });

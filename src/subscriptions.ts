@@ -1,5 +1,4 @@
 import { parseResourceUri } from './domains.js';
-import type { MinuteWindowMeter } from './budget.js';
 
 /**
  * Subscription bookkeeping for `polestar://vehicle/{vin}/{kind}/{domain}` URIs.
@@ -14,7 +13,6 @@ export interface SubscriptionDeps {
   read(vin: string, kind: 'telemetry' | 'charging', name: string): Promise<Record<string, unknown> | null>;
   /** Used to pause rather than spend the last tenth of the daily budget. */
   budget: { isLow(fraction: number): boolean };
-  minute?: MinuteWindowMeter;
   notify(uri: string): Promise<void>;
   log(message: string): void;
   /** Default one minute; a test drives it by passing its own timer. */
@@ -29,6 +27,7 @@ export interface SubscriptionPoller {
   unsubscribe(uri: string): void;
   /** One round of polling. Public so a test, or a caller, need not wait. */
   pollOnce(): Promise<void>;
+  /** Finish: stop the clock and forget every target. Idempotent. */
   stop(): void;
   readonly size: number;
 }
@@ -71,6 +70,19 @@ export function createSubscriptionPoller(deps: SubscriptionDeps): SubscriptionPo
     if (lastEventId.size === 0) stopTimer();
   }
 
+  /**
+   * Finish for good: stop the clock and drop every target.
+   *
+   * Stopping the timer alone left `size` reporting subscriptions that nothing was
+   * polling, so a host asking a finished surface how much work it had in flight
+   * got the wrong answer, and the VINs stayed reachable from a map nobody would
+   * read again.
+   */
+  function finish(): void {
+    stopTimer();
+    lastEventId.clear();
+  }
+
   async function pollOnce(): Promise<void> {
     if (lastEventId.size === 0) {
       stopTimer();
@@ -104,7 +116,7 @@ export function createSubscriptionPoller(deps: SubscriptionDeps): SubscriptionPo
     subscribe,
     unsubscribe,
     pollOnce,
-    stop: stopTimer,
+    stop: finish,
     get size() {
       return lastEventId.size;
     },

@@ -103,6 +103,12 @@ try {
   const read = await client.request('resources/read', { uri: `polestar://vehicle/${VIN}/telemetry/battery` });
   const readText = JSON.stringify(read.result);
   if (!readText.includes('Charge:')) throw new Error(`resources/read did not humanize battery: ${readText.slice(0, 200)}`);
+  // The resource read is now the same read get_battery performs, so it carries the
+  // same header. The resource surface used to render its own, smaller version with
+  // no data age at all, and nothing could tell that the two had drifted.
+  if (!/Vehicle .*telemetry\/battery \(data observed /.test(readText)) {
+    throw new Error(`resources/read did not use the shared Domain read header: ${readText.slice(0, 240)}`);
+  }
 
   // A failed resource read renders like a failed tool call: the shared text carries
   // the code and, when upstream gave one, the requestId.

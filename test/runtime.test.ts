@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { PolestarApiError } from '../src/client.js';
-import { clientFor, describeError, errorResult, readDomainFormatted } from '../src/tool-output.js';
+import { describeError, errorResult } from '../src/tool-output.js';
+import { clientFor, readDomain, readDomainFormatted } from '../src/vehicle-read.js';
+import { MINTED_CODES, toFailure } from '../src/failure.js';
 import { HttpTransport } from '../src/transport.js';
 import { DOMAINS } from '../src/domains.js';
 import { domainToolSpecs } from '../src/domain-tools.js';
+import { aggregateToolSpecs } from '../src/aggregate-tools.js';
+import { advisorToolSpecs } from '../src/advisor-tools.js';
+import { historyToolSpecs } from '../src/history-tools.js';
+import { toolSpec } from '../src/tools.js';
 import { test } from 'node:test';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -226,6 +232,40 @@ test('background sampling is opt-in and budget-guarded, never self-starting', as
   assert.equal(rounds, before, 'stop() really stops: no quota spent afterwards');
 });
 
+test('the sampler states the cadence and guard it actually runs', async () => {
+  // polestar_status used to get this sentence handed to it from the environment
+  // beside the sampler, which restated the clamp and a hardcoded 80% instead of
+  // reading them. With a non-default guard the tool therefore reported the wrong
+  // number, and nothing could see it. The sampler answers for itself now, so a
+  // changed guard shows up here.
+  const vin = 'YSMTEST22PL000001';
+  const client = { vehicles: async () => [vin] } as unknown as PolestarClient;
+  const sampler = new HistorySampler(client, new BudgetMeter(10_000), async () => undefined, {
+    intervalSeconds: 900,
+    budgetGuardFraction: 0.5,
+    sleep: new FakeSleep().sleep,
+  });
+
+  assert.match(sampler.describe(), /^off, /, 'a sampler that was never started says so');
+
+  await sampler.start();
+  assert.equal(sampler.describe(), 'on, every 900s, stands down at 50% of the daily budget');
+  sampler.stop();
+});
+
+test('the sampler reports the cadence it was clamped to, not the one requested', async () => {
+  const sampler = new HistorySampler(
+    { vehicles: async () => [] } as unknown as PolestarClient,
+    new BudgetMeter(10_000),
+    async () => undefined,
+    { intervalSeconds: 5, sleep: new FakeSleep().sleep },
+  );
+  // start() with no vehicle still marks the sampler as on, and 5s is clamped up to
+  // the 60s floor: describe() must report what runs, not what was asked for.
+  assert.equal(await sampler.start(), 0);
+  assert.match(sampler.describe(), /no vehicle to sample/);
+});
+
 test('Retry-After is honoured as given instead of clamped to the backoff cap', async () => {
   const waits: number[] = [];
   let calls = 0;
@@ -322,6 +362,97 @@ test('POLESTAR_REDACT_VIN covers the structured envelope, not only the text', as
   const hidden = await readDomainFormatted({ ...base, redactVin: true }, battery, {}, {});
   assert.equal(hidden.structuredContent?.vin, 'YSM…001');
   assert.equal(JSON.stringify(hidden).includes(vin), false, 'the whole result must be free of the full VIN');
+});
+
+test('every tool that reads a domain says its absence in the same words', async () => {
+  // Nine tools each phrased this themselves. get_battery and readDomainFormatted
+  // said one thing, is_car_secure said "No exterior data available for …",
+  // get_needs_attention said "No health data available…", get_charging_estimate
+  // said "No battery data available, cannot estimate.", and plan_cheapest_charge
+  // said "Missing required data". A caller reading two tools had no way to know
+  // whether the car disagreed or the server did.
+  const vin = 'YSMTEST22PL000001';
+  const client = {
+    async resolveVin(v?: string) { return v ?? vin; },
+    async vehicles() { return [vin]; },
+    async domain() { return null; }, // every domain answers DATA_NOT_AVAILABLE
+  } as unknown as PolestarClient;
+  const deps = { client, redactVin: false, vehicleLabels: {}, delegatedAccounts: [], units: 'km' } as ToolDeps;
+  const specs = [...domainToolSpecs(deps), ...aggregateToolSpecs(deps), ...advisorToolSpecs(deps)];
+  const expected = /\(the API returned DATA_NOT_AVAILABLE, this vehicle does not report this domain\)\./;
+
+  for (const name of ['get_battery', 'get_car_status', 'is_car_secure', 'get_needs_attention', 'get_charging_estimate', 'plan_cheapest_charge']) {
+    const args = name === 'plan_cheapest_charge' ? { prices: [] } : {};
+    const out = await toolSpec(specs, name).run(args, {});
+    assert.match(out.content[0]!.text, expected, `${name} states the absence in the shared words`);
+  }
+});
+
+test('every tool that takes a vin asks which vehicle instead of failing on its own', async () => {
+  // get_battery could ask the client to pick a vehicle while get_car_status,
+  // is_car_secure, get_needs_attention, get_charging_estimate and
+  // plan_cheapest_charge answered AMBIGUOUS_VIN, so whether a two-car credential
+  // got a question or an error depended on which tool the model happened to call.
+  const asked: string[][] = [];
+  const read: string[] = [];
+  const chosen = 'YSMTEST22PL000002';
+  const client = {
+    async resolveVin(vin?: string) {
+      if (vin === undefined) throw new PolestarApiError('AMBIGUOUS_VIN', 'this credential sees two vehicles', 400);
+      return vin;
+    },
+    async vehicles() { return ['YSMTEST22PL000001', chosen]; },
+    async domain(vin: string) {
+      read.push(vin);
+      return null;
+    },
+  } as unknown as PolestarClient;
+  const deps = { client, redactVin: false, vehicleLabels: {}, delegatedAccounts: [], units: 'km' } as ToolDeps;
+  const specs = [...domainToolSpecs(deps), ...aggregateToolSpecs(deps), ...advisorToolSpecs(deps)];
+  const ctx = {
+    mcpReq: {
+      elicitInput: async (params: { requestedSchema?: { properties?: { vin?: { enum?: string[] } } } }) => {
+        asked.push(params.requestedSchema?.properties?.vin?.enum ?? []);
+        return { action: 'accept', content: { vin: chosen } };
+      },
+    },
+  };
+
+  for (const name of ['get_battery', 'get_car_status', 'is_car_secure', 'get_needs_attention', 'get_charging_estimate', 'plan_cheapest_charge']) {
+    asked.length = 0;
+    read.length = 0;
+    const args = name === 'plan_cheapest_charge' ? { prices: [] } : {};
+    await toolSpec(specs, name).run(args, ctx);
+    assert.deepEqual(asked[0], ['YSMTEST22PL000001', chosen], `${name} offered the vehicles the credential can see`);
+    assert.ok(read.length > 0, `${name} read something after the answer`);
+    assert.ok(read.every((v) => v === chosen), `${name} read the chosen vehicle and no other, got ${read.join(', ')}`);
+  }
+});
+
+test('the resource read and the tool read of one Domain are the same read', async () => {
+  // The resource surface had its own implementation of a Domain read: no data age,
+  // no owner label, no elicitation, no structured envelope. It had already drifted,
+  // and nothing could see it, because no test called registerResources at all. Both
+  // surfaces now wrap one reading, so the two texts are the same string.
+  const vin = 'YSMTEST22PL000001';
+  const client = {
+    async resolveVin(v?: string) { return v ?? vin; },
+    async vehicles() { return [vin]; },
+    async domain() { return { batteryChargeLevelPercentage: 61, vin, metaReceivedAt: '2026-01-01T00:00:00.000Z' }; },
+  } as unknown as PolestarClient;
+  const deps: ToolDeps = { client, redactVin: false, vehicleLabels: { [vin]: 'The Polestar' }, delegatedAccounts: [], units: 'km', nowMs: () => Date.parse('2026-01-01T03:00:00Z') };
+  const battery = DOMAINS.find((d) => d.name === 'battery');
+  assert.ok(battery !== undefined);
+
+  const reading = await readDomain(deps, battery, {}, undefined);
+  assert.ok(reading.ok, 'the read succeeds');
+  // The age, and the owner label the resource surface ignored, are both here.
+  assert.match(reading.reading.text, /^Vehicle The Polestar, telemetry\/battery \(data observed 3 h ago\)/);
+  assert.equal(reading.reading.ageSeconds, 10_800);
+
+  const tool = await readDomainFormatted(deps, battery, {}, {});
+  assert.equal(tool.content[0]!.text, reading.reading.text, 'one reading, two wrappers');
+  assert.equal(tool.structuredContent?.vin, vin);
 });
 
 test('the domain registry is a value, and its handlers answer', async () => {
@@ -469,6 +600,32 @@ test('the minute ceiling maps to RATE_LIMIT_MINUTE with a hint', () => {
   assert.match(String(r.structuredContent?.hint), /100 requests\/minute/);
 });
 
+test('every minted code is recognised and carries its own advice', () => {
+  // One closed list, three derivations. The set of minted codes used to be a
+  // second hand-written copy of the union, which the compiler could not see:
+  // adding a code compiled cleanly and then fell through to the generic hint,
+  // losing the advice MINTED_HINTS had just been forced to provide. Walking the
+  // source tuple is what makes that drift observable.
+  assert.ok(MINTED_CODES.length > 0, 'the tuple is the source; an empty one would pass everything below');
+  for (const code of MINTED_CODES) {
+    const failure = toFailure(new PolestarApiError(code, 'synthetic failure', 500));
+    assert.equal(failure.minted, code, `${code} is in MINTED_CODES but toFailure did not recognise it as minted`);
+    const result = errorResult(new PolestarApiError(code, 'synthetic failure', 500));
+    assert.doesNotMatch(
+      String(result.structuredContent?.hint),
+      /not one this server documents/,
+      `${code} reached the generic hint instead of the advice written for it`,
+    );
+  }
+
+  // And the other direction: an upstream code must not be mistaken for a minted
+  // one, or a live API error would be answered with this server's advice for a
+  // code it never minted.
+  const upstream = toFailure(new PolestarApiError('AUTHZ_VIN_UNAUTHORIZED', 'upstream', 403));
+  assert.equal(upstream.minted, undefined, 'a code the Data Portal answered is not a minted code');
+  assert.match(String(errorResult(new PolestarApiError('AUTHZ_VIN_UNAUTHORIZED', 'upstream', 403)).structuredContent?.hint), /cannot see that VIN/);
+});
+
 test('an allowlisted delegated account serves the read, not just the VIN lookup', async () => {
   // The bug this pins: the delegated client was built, used to resolve the VIN,
   // and then the domain read went out on the base client, so the request
@@ -498,6 +655,49 @@ test('an allowlisted delegated account serves the read, not just the VIN lookup'
     ['domain:delegated:partner-a'],
     'the data read must be served by the delegated client, not the base one',
   );
+});
+
+test('every tool that reads a car declares the delegation, and reads through it', async () => {
+  // delegated_account_id was declared by the 15 Domain tools alone, so a fleet
+  // operator could delegate get_battery but not get_car_status. The SDK drops an
+  // undeclared argument rather than refusing it, so the aggregate silently answered
+  // from the operator's own account while looking like a scoped read.
+  const vin = 'YSMTEST22PL000001';
+  const readThrough = { delegated: 0, base: 0 };
+  const payload = { vin, metaReceivedAt: '2026-01-01T00:00:00.000Z', batteryChargeLevelPercentage: 61 };
+  const delegatedClient = {
+    async resolveVin(v?: string) { return v ?? vin; },
+    async vehicles() { return [vin]; },
+    async domain() { readThrough.delegated += 1; return payload; },
+  };
+  const client = {
+    async resolveVin(v?: string) { return v ?? vin; },
+    async vehicles() { return [vin]; },
+    async domain() { readThrough.base += 1; return payload; },
+    forDelegation() { return delegatedClient as never; },
+  };
+  const deps = { client, redactVin: false, vehicleLabels: {}, delegatedAccounts: ['partner-a'], units: 'km' } as unknown as ToolDeps;
+  const store = new HistoryStore(mkdtempSync(path.join(tmpdir(), 'polestar-delegation-')));
+  const specs = [
+    ...domainToolSpecs(deps),
+    ...aggregateToolSpecs(deps),
+    ...advisorToolSpecs(deps),
+    ...historyToolSpecs({ ...deps, store }),
+  ];
+
+  const argsOf = (spec: { args?: unknown }): Record<string, unknown> => (spec.args ?? {}) as Record<string, unknown>;
+  const readers = specs.filter((s) => 'vin' in argsOf(s));
+  for (const name of ['get_battery', 'get_car_status', 'is_car_secure', 'get_needs_attention', 'get_charging_estimate', 'plan_cheapest_charge', 'get_history']) {
+    assert.ok(readers.some((s) => s.name === name), `${name} reads a car, so it should offer a vin`);
+  }
+  for (const spec of readers) {
+    assert.ok('delegated_account_id' in argsOf(spec), `${spec.name} takes a vin, so it must take a delegation too`);
+  }
+
+  // Declaring it is not enough: the read has to go out under it.
+  await toolSpec(specs, 'get_car_status').run({ delegated_account_id: 'partner-a' }, {});
+  assert.ok(readThrough.delegated > 0, 'get_car_status read through the delegated client');
+  assert.equal(readThrough.base, 0, 'and never through the base one');
 });
 
 test('history deduplication survives a restart', () => {

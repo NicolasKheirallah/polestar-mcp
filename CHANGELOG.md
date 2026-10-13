@@ -11,6 +11,26 @@ All notable changes to this project. The format follows
   safety design as markdown docs: `docs/live-contract-findings.md`,
   `docs/consumer-adapter-note.md`, `docs/write-endpoints.md`.
 
+### Changed
+
+- Which vehicle a call is about, and how its domains are read, now come from one module
+  (`src/vehicle-read.ts`). Every tool that takes a `vin` asks the client which vehicle to read
+  when the credential sees several, instead of answering `AMBIGUOUS_VIN` the way the
+  aggregates, the advisor and the history tools used to.
+- `delegated_account_id` is accepted by every tool that reads a car, not by the fifteen
+  domain tools alone, where the SDK dropped the argument rather than refusing it.
+- A `polestar://` resource read is now the same read as the `get_*` tool for that domain, so
+  it carries the data age, the owner label and the VIN redaction rule it lacked, and a
+  domain the car does not report reads the same through both surfaces.
+
+### Fixed
+
+- HTTP mode appended a subscription poller per request to a module-level list that only
+  `SIGTERM` could drain. An MCP surface now owns the pollers it starts and stops them when it
+  closes, which is what the response teardown already did for the transport.
+- A stopped subscription poller left its targets in the map, so a restarted poller for the
+  same URI was treated as still subscribed.
+
 ### Removed
 
 - `polestar-mcp-handbook.pdf`. Its other chapters already exist as the markdown

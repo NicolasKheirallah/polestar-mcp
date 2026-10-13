@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { parseDomainPath } from './domains.js';
+import { parseDomainPath, VEHICLES_PATH } from './domains.js';
 
 export interface TransportRequest {
   method?: string;
@@ -94,7 +94,7 @@ export class FixtureTransport implements Transport {
       // Captured dumps store the token response under dataportal/.
       return this.readFile(['dataportal', 'token.json'], 'token');
     }
-    if (pathname.endsWith('/v1/vehicles') && method === 'GET') {
+    if (pathname.endsWith(VEHICLES_PATH) && method === 'GET') {
       return this.readFile(['dataportal', 'vehicles.json'], 'vehicles');
     }
     const ref = parseDomainPath(pathname);

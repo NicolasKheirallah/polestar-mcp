@@ -21,7 +21,8 @@ MCP client (stdio)         HTTP client (Streamable HTTP, stateless)
 |         three prompts                                        |
 |         tools.ts (one registrar), format.ts (humanizer),     |
 |         domain-data.ts (payloads), charge-model.ts,          |
-|         failure.ts, tool-output.ts (vin/raw)                 |
+|         failure.ts, tool-output.ts (the result envelope),    |
+|         vehicle-read.ts (which Vehicle, which Domains)       |
 |                   |                                          |
 | client.ts   PolestarClient (the deep module)                 |
 |             resolveVin, unwrap, identity checks, errors      |
@@ -54,25 +55,31 @@ The dotenv loader here handles the idioms hand-rolled parsers get wrong: a leadi
 
 ### `server.ts`: wiring, stdio, and HTTP
 
-`buildEngine()` constructs everything shared: config, budget meter, optional history store and sampler, the transport chain, token provider, and client. `createMcpServer()` registers the tools, resources, and prompts on an MCP server whose `instructions` field tells clients the important ground rules up front: the API is read-only, start with `list_vehicles`, prefer `get_car_status` over five domain calls, read the data age, and quote `requestId` when reporting problems.
+`buildEngine()` constructs everything shared: config, budget meter, optional history store and sampler, the transport chain, token provider, and client. `createMcpServer()` returns an `McpSurface`: the MCP server, the tool names it registered, the subscription count it is polling for, and a `close()` that stops everything the surface started. Its `instructions` field tells clients the important ground rules up front: the API is read-only, start with `list_vehicles`, prefer `get_car_status` over five domain calls, read the data age, and quote `requestId` when reporting problems.
 
 Transport choice and modes:
 
 - stdio (default) connects a `StdioServerTransport`; stdout carries the JSON-RPC protocol and nothing else, so diagnostics go to stderr and an unhandled rejection is logged rather than fatal.
-- `POLESTAR_HTTP_PORT` switches to a stateless Streamable HTTP server: each request gets a fresh MCP server instance over one shared engine (cache, budget, history included). It binds `127.0.0.1` unless told otherwise, and refuses to bind any non-loopback address without `POLESTAR_HTTP_TOKEN`, because the server reads vehicle location and an unauthenticated listener would put that on the network. Subscriptions are a stdio feature.
+- `POLESTAR_HTTP_PORT` switches to a stateless Streamable HTTP server: each request gets a fresh `McpSurface` over one shared engine (cache, budget, history included). It binds `127.0.0.1` unless told otherwise, and refuses to bind any non-loopback address without `POLESTAR_HTTP_TOKEN`, because the server reads vehicle location and an unauthenticated listener would put that on the network. Resources and subscriptions work in both modes: an HTTP response's `close` calls `surface.close()`, which stops the poller that surface created.
 - In fixture mode the secrets file is not read at all, so offline use never touches a live credential file.
 
-Shutdown is deliberate: on `SIGTERM`/`SIGINT` the sampler stops taking quota calls, the MCP session closes so clients see a real end-of-session, and the exit code says "stopped" rather than "crashed" (with a 5-second hard exit as the backstop).
+Shutdown is deliberate: on `SIGTERM`/`SIGINT` the sampler stops taking quota calls, the MCP session closes and its poller stops so clients see a real end-of-session, and the exit code says "stopped" rather than "crashed" (with a 5-second hard exit as the backstop).
 
 ### `domains.ts`: the domain registry
 
 The heart of the tool surface is `DOMAINS`, one entry per read Domain of the API: kind (`telemetry` or `charging`), URL path segment, OAuth scope, a description, the cache lifetime that Domain's own value can bear (`ttlMs`), whether background sampling should watch it (`sampled`), and the key set its captured fixture must hold (`pinnedKeys`). Everything else derives from those rows: tool names (`target-soc` becomes `get_target_soc`), the scope list the token request sends, the resource URI space, the sampler's schedule, the cache's freshness rules, and the contract test's expectations.
 
-The rows are split from their registration on purpose. `domain-tools.ts` turns them into `ToolSpec` values; `caching-transport.ts`, `sampler.ts` and the fixture gate read the same rows without importing anything about tools. A Domain fact that lives only in a satellite list is how a forgotten edit becomes a wrong TTL on live quota rather than a failing test, and `domains.ts` also owns `domainPath`, `parseDomainPath` and `parseResourceUri`, the three spellings of one Domain route.
+The rows are split from their registration on purpose. `domain-tools.ts` turns them into `ToolSpec` values; `caching-transport.ts`, `sampler.ts` and the fixture gate read the same rows without importing anything about tools. A Domain fact that lives only in a satellite list is how a forgotten edit becomes a wrong TTL on live quota rather than a failing test, and `domains.ts` also owns the route grammar: `domainPath`, `domainRequestPath`, `parseDomainPath` and `parseResourceUri`. `PolestarClient` fills the VIN into `domainPath`'s own template, so the path a tool description advertises and the path the request goes out on are one value rather than two literals that happen to agree.
 
-### `tool-output.ts` and `format.ts`: the humanizer
+### `vehicle-read.ts`: which Vehicle, and which Domains
 
-`readDomainFormatted()` is the one rendering path for domain reads: resolve the VIN, fetch through the cache, and answer with a header (vehicle, domain, data age), a humanized summary, and the raw payload when `raw: true` is requested. `format.ts` does the summarizing: enum labels lose their `CHARGING_STATUS_V2_`-style prefixes and gain readable wording ("Unplugged", "Asleep / not in use"), values get sane units, and each answer's age comes from the payload's own timestamp. A 403 answer gains a scope hint, because the M2M credential is scope-scoped per domain and the raw API message never says which scope was missing.
+Every tool that reads data needs the same three things before it can say anything: the Vehicle a call is about, a read of the Domains it needs, and something to say when the car reports nothing. `vehicleFor()` resolves the Vehicle once, applying the caller's delegated account first; `readDomains()` reads a named set of Domains concurrently; `noData()` is the one sentence for a Domain a car does not report.
+
+Keeping that in one module is what lets a tool body be its own prose. It also settled two divergences no single tool could see from where it stood: only one of the nine tools could ask the client which vehicle to use, and four of them stated the same absence four different ways. `readDomain()` is the rendered form of the same read, and both the `get_*` tool for a Domain and the `polestar://` resource that mirrors it wrap that identical reading, so a subscribed resource carries the data age, the owner label and the redaction rule the old resource handler lacked.
+
+### `tool-output.ts`, `vehicle-read.ts` and `format.ts`: the result and the humanizer
+
+`tool-output.ts` is what a result looks like: the shared `vin`/`raw` argument shapes, `text()` and `errorResult()`, and the advice behind each error code. `readDomain()` in `vehicle-read.ts` is the one rendering path for domain reads: resolve the VIN, fetch through the cache, and answer with a header (vehicle, domain, data age), a humanized summary, and the raw payload when `raw: true` is requested. `format.ts` does the summarizing: enum labels lose their `CHARGING_STATUS_V2_`-style prefixes and gain readable wording ("Unplugged", "Asleep / not in use"), values get sane units, and each answer's age comes from the payload's own timestamp. A 403 answer gains a scope hint, because the M2M credential is scoped per domain and the raw API message never says which scope was missing.
 
 ### `aggregate-tools.ts`, `advisor-tools.ts`, `system-tools.ts`
 
@@ -82,7 +89,7 @@ The rows are split from their registration on purpose. `domain-tools.ts` turns t
 
 ### `history.ts`, `sampler.ts`, `history-tools.ts`: memory for a stateless API
 
-The API answers only "what is true right now", so any longitudinal question needs a local store. `HistoryStore` is an append-only JSONL file per vehicle and domain, deduplicated by the cloud's `metaEventId`: the cloud re-serves the same ID until the car reports something new, so unchanged snapshots cost a single line. A torn last line (a crash mid-append) is tolerated on read. Recording hooks into the cache's live-response callback, so passive recording never spends an extra call. `HistorySampler` optionally polls the four fast-moving domains on a timer (default every 10 minutes, clamped 60 to 3600 seconds) and stands down entirely once 80% of the daily budget is spent; it is off unless `POLESTAR_SAMPLE=1`. The three history tools ride on top: raw samples, a degradation series (implied full-charge range from range/SoC, implied capacity from usable energy/SoC; samples under 5% SoC are skipped as noise), and reconstructed charging sessions (a maximal run of charging samples, gaps up to 30 minutes allowed).
+The API answers only "what is true right now", so any longitudinal question needs a local store. `HistoryStore` is an append-only JSONL file per vehicle and domain, deduplicated by the cloud's `metaEventId`: the cloud re-serves the same ID until the car reports something new, so unchanged snapshots cost a single line. A torn last line (a crash mid-append) is tolerated on read. Recording hooks the client, not the cache: `PolestarClient` reports each read it has already unwrapped, along with the change id it found in the same envelope, so passive recording never spends an extra call and no module below the client has to know the envelope's shape. `HistorySampler` optionally polls the four fast-moving domains on a timer (default every 10 minutes, clamped 60 to 3600 seconds) and stands down entirely once 80% of the daily budget is spent; it is off unless `POLESTAR_SAMPLE=1`, and it answers `describe()` for `polestar_status` itself rather than having the composition root restate its cadence and its guard. The three history tools ride on top: raw samples, a degradation series (implied full-charge range from range/SoC, implied capacity from usable energy/SoC; samples under 5% SoC are skipped as noise), and reconstructed charging sessions (a maximal run of charging samples, gaps up to 30 minutes allowed).
 
 ### `client.ts`: the deep module
 
@@ -101,7 +108,7 @@ The API answers only "what is true right now", so any longitudinal question need
 
 `Transport` remains a one-method seam (`fetch(url, request)` to status, headers, and body), and the chain layers three adapters around it:
 
-- `CachingTransport` serves repeated GETs locally. Each URL gets a TTL from how fast the value can actually change: vehicle list 1 hour; battery, location, and exterior 30 seconds; availability, odometer, and parking climatization 60 seconds; pre-cleaning 30 minutes; health 10 minutes; charging settings 5 minutes. Once an entry expires, the caller gets the last known value immediately (counted as "stale served") while a single-flight refresh runs in the background, so latency never waits on Polestar. The token POST and error responses pass straight through, and every successful live domain GET fires the history recorder.
+- `CachingTransport` serves repeated GETs locally. Each URL gets a TTL from how fast the value can actually change: vehicle list 1 hour; battery, location, and exterior 30 seconds; availability, odometer, and parking climatization 60 seconds; pre-cleaning 30 minutes; health 10 minutes; charging settings 5 minutes. Once an entry expires, the caller gets the last known value immediately (counted as "stale served") while a single-flight refresh runs in the background, so latency never waits on Polestar. The token POST and error responses pass straight through. It knows nothing about the envelope: history recording happens one layer up, in the client.
 - `RetryingTransport` retries exactly the failures the API documents: 429 (honoring `Retry-After` when present) and 502/503, with exponential backoff capped at 5 seconds and at most 3 attempts. Every attempt, including retries, is metered against the budget before it goes out. Network errors are not retried; the caller sees them immediately.
 - `HttpTransport` (a 15-second default deadline per request) and `FixtureTransport` (the captured-dump adapter) sit at the bottom, unchanged in spirit: the deadline exists because one hung connection would otherwise wedge every caller queued behind it, and the fixture adapter keeps missing fixtures (`NOT_FOUND`) deliberately distinct from missing data (`DATA_NOT_AVAILABLE`), replays captured error statuses, and refuses lookups that escape the fixtures directory.
 

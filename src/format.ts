@@ -1,15 +1,16 @@
 import {
   ampLimitA,
-  pendingAmpLimitA,
-  chargeLevelPct,
+  availabilityView,
+  batteryView,
   chargeWindow,
-  distanceToEmptyKm,
   epochSecondsMs,
+  exteriorView,
+  healthView,
   numberField,
   odometerMeters,
+  pendingAmpLimitA,
   position,
   targetSoc,
-  timeToFullMinutes,
 } from './domain-data.js';
 
 /**
@@ -138,20 +139,22 @@ export function vinLabel(vin: string, redact: boolean, labels?: Record<string, s
 export function summarizeDomain(name: string, data: Record<string, unknown>, units: Units): string[] | null {
   switch (name) {
     case 'battery': {
+      const battery = batteryView(data);
       const lines = [
-        `Charge: ${pct(chargeLevelPct(data))} · range ${distance(distanceToEmptyKm(data), units)}`,
-        `Charging: ${humanizeEnum(data.chargingStatusV2 ?? data.chargingStatus)} · ${humanizeEnum(data.chargerConnectionStatus)}`,
+        `Charge: ${pct(battery.chargeLevelPct)} · range ${distance(battery.distanceToEmptyKm, units)}`,
+        `Charging: ${humanizeEnum(battery.status)} · ${humanizeEnum(battery.connection)}`,
       ];
-      const power = data.chargingPowerWatts;
-      if (typeof power === 'number' && power > 0) {
+      if (battery.powerWatts !== undefined && battery.powerWatts > 0) {
         lines.push(
-          `Charge power: ${(power / 1000).toFixed(1)} kW (${data.chargingVoltageVolts ?? 'n/a'} V / ${data.chargingCurrentAmps ?? 'n/a'} A)`,
+          `Charge power: ${(battery.powerWatts / 1000).toFixed(1)} kW (${battery.volts ?? 'n/a'} V / ${battery.amps ?? 'n/a'} A)`,
         );
       }
-      const eta = timeToFullMinutes(data);
-      if (eta !== undefined && eta > 0) lines.push(`Time to full: ~${eta} min`);
-      const consumption = data.averageEnergyConsumptionKwhPer100Km;
-      if (typeof consumption === 'number') lines.push(`Average consumption: ${consumption} kWh/100km`);
+      if (battery.timeToFullMinutes !== undefined && battery.timeToFullMinutes > 0) {
+        lines.push(`Time to full: ~${battery.timeToFullMinutes} min`);
+      }
+      if (battery.consumptionKwhPer100Km !== undefined) {
+        lines.push(`Average consumption: ${battery.consumptionKwhPer100Km} kWh/100km`);
+      }
       return lines;
     }
     case 'odometer':
@@ -168,25 +171,28 @@ export function summarizeDomain(name: string, data: Record<string, unknown>, uni
       ];
     }
     case 'exterior': {
-      const openItems = openEntries(data);
-      const lock = humanizeEnum(data.centralLock);
-      const alarm = humanizeEnum(data.alarm);
+      const exterior = exteriorView(data);
+      const lock = humanizeEnum(exterior.centralLock);
+      const alarm = humanizeEnum(exterior.alarm).toLowerCase();
       return [
-        openItems.length === 0
-          ? `All doors, windows, hood and tailgate closed · ${lock} · alarm ${alarm.toLowerCase()}`
-          : `Open: ${openItems.join(', ')} · ${lock} · alarm ${alarm.toLowerCase()}`,
+        exterior.open.length === 0
+          ? `All doors, windows, hood and tailgate closed · ${lock} · alarm ${alarm}`
+          : `Open: ${exterior.open.join(', ')} · ${lock} · alarm ${alarm}`,
       ];
     }
     case 'health': {
+      const health = healthView(data);
       const warnings = activeWarnings(data);
       const lines = [
-        `Service in ${data.daysToService ?? 'n/a'} days / ${distance(data.distanceToServiceKm as number | undefined, units)}`,
+        `Service in ${health.daysToService ?? 'n/a'} days / ${distance(health.distanceToServiceKm, units)}`,
         warnings.length === 0 ? 'No warnings' : `Warnings: ${warnings.join(', ')}`,
       ];
       return lines;
     }
-    case 'availability':
-      return [`Availability: ${humanizeEnum(data.availabilityStatus)} · ${humanizeEnum(data.usageMode)}`];
+    case 'availability': {
+      const availability = availabilityView(data);
+      return [`Availability: ${humanizeEnum(availability.status)} · ${humanizeEnum(availability.usageMode)}`];
+    }
     case 'parking-climatization':
       return [
         `Preheat/pre-cool: ${humanizeEnum(data.runningStatus)}`,
@@ -236,14 +242,6 @@ export function summarizeDomain(name: string, data: Record<string, unknown>, uni
     default:
       return null;
   }
-}
-
-function openEntries(data: Record<string, unknown>): string[] {
-  const out: string[] = [];
-  for (const [key, value] of Object.entries(data)) {
-    if (value === 'OPEN_STATUS_OPEN') out.push(key.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase());
-  }
-  return out;
 }
 
 /**
