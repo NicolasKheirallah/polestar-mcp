@@ -84,7 +84,7 @@ export class StdioMcpClient {
     serverName: string,
     protocolVersion = '2025-06-18',
     capabilities: Record<string, unknown> = {},
-  ): Promise<void> {
+  ): Promise<Record<string, unknown>> {
     const init = await this.request('initialize', {
       protocolVersion,
       capabilities,
@@ -93,6 +93,10 @@ export class StdioMcpClient {
     const name = (init.result?.serverInfo as { name?: string } | undefined)?.name;
     if (name !== serverName) throw new Error(`handshake failed: server name ${JSON.stringify(name)}`);
     this.notifyInitialized();
+    // The capabilities are half of what the handshake decides: a client learns from
+    // here whether this transport can keep a subscription, so the smoke runs assert
+    // them rather than assuming them.
+    return (init.result?.capabilities as Record<string, unknown> | undefined) ?? {};
   }
 
   /** The content this test client returns when the server asks the user something. */

@@ -5,6 +5,8 @@ import {
   HistoryStore,
   type HistoryRecord,
 } from './history.js';
+import { PolestarApiError } from './client.js';
+import { DOMAINS, findDomain } from './domains.js';
 import { delegatedAccountArg, errorResult, text, vinArg, type ToolDeps, type VinArgs } from './tool-output.js';
 import { vehicleFor } from './vehicle-read.js';
 import type { ToolSpec } from './tools.js';
@@ -57,12 +59,22 @@ export function historyToolSpecs(deps: HistoryDeps): ToolSpec[] {
         const found = await vehicleFor(deps, ctx, args ?? {}, 'pick-vehicle-history');
         if (!found.ok) return found.result;
         const vin = found.vehicle.vin;
-        const parsed = /(\w+)\/([\w-]+)/.exec(args?.domain ?? '');
-        const kind = (parsed?.[1] ?? 'telemetry') as 'telemetry' | 'charging';
-        const name = parsed?.[2] ?? args?.domain;
-        if (!name) return text('Pass a domain like "telemetry/battery".');
-        const sinceMs = args?.hours !== undefined ? Date.now() - args.hours * 3_600_000 : undefined;
-        const records = deps.store.query(vin, kind, name, { ...(sinceMs !== undefined ? { sinceMs } : {}), limit: args?.limit ?? 200 });
+        // The registry decides what a domain is, here as everywhere else. This
+        // used to re-spell the route with its own regex and then hand whatever it
+        // matched to the store, so a typo read as "no history records matched"
+        // instead of as a name no Domain has.
+        const asked = args?.domain ?? '';
+        const slash = asked.indexOf('/');
+        const spec = slash < 0 ? undefined : findDomain(asked.slice(0, slash), asked.slice(slash + 1));
+        if (spec === undefined) {
+          throw new PolestarApiError(
+            'UNKNOWN_DOMAIN',
+            `"${asked}" is not a registered domain. This server records ${DOMAINS.length} domains, listed by kind/name.`,
+            400,
+          );
+        }
+        const sinceMs = args?.hours !== undefined ? (deps.nowMs?.() ?? Date.now()) - args.hours * 3_600_000 : undefined;
+        const records = deps.store.query(vin, spec.kind, spec.name, { ...(sinceMs !== undefined ? { sinceMs } : {}), limit: args?.limit ?? 200 });
         return text(
           recordsToText(records, (data) => {
             const interesting = ['batteryChargeLevelPercentage', 'estimatedDistanceToEmptyKm', 'odometerMeters', 'chargingPowerWatts', 'measuredParticulateMatter25'];
@@ -87,7 +99,7 @@ export function historyToolSpecs(deps: HistoryDeps): ToolSpec[] {
         const found = await vehicleFor(deps, ctx, args ?? {}, 'pick-vehicle-degradation');
         if (!found.ok) return found.result;
         const vin = found.vehicle.vin;
-        const sinceMs = args?.days !== undefined ? Date.now() - args.days * 86_400_000 : undefined;
+        const sinceMs = args?.days !== undefined ? (deps.nowMs?.() ?? Date.now()) - args.days * 86_400_000 : undefined;
         const samples = deps.store.batteryChronological(vin, sinceMs);
         if (samples.length < 5) {
           return text(`Only ${samples.length} battery sample(s) recorded, need at least 5. History accrues while the server runs with history enabled.`);
@@ -133,7 +145,7 @@ export function historyToolSpecs(deps: HistoryDeps): ToolSpec[] {
         const found = await vehicleFor(deps, ctx, args ?? {}, 'pick-vehicle-sessions');
         if (!found.ok) return found.result;
         const vin = found.vehicle.vin;
-        const sinceMs = args?.days !== undefined ? Date.now() - args.days * 86_400_000 : undefined;
+        const sinceMs = args?.days !== undefined ? (deps.nowMs?.() ?? Date.now()) - args.days * 86_400_000 : undefined;
         const samples = deps.store.batteryChronological(vin, sinceMs);
         const sessions = extractChargingSessions(samples);
         if (sessions.length === 0) return text('No charging sessions in the recorded history.');

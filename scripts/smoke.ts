@@ -38,7 +38,11 @@ const client = StdioMcpClient.spawn(['--import', 'tsx', 'src/server.ts'], {
 });
 
 try {
-  await client.initialize('polestar-mcp');
+  const capabilities = await client.initialize('polestar-mcp');
+  // stdio is the transport that can keep a subscription alive, and it says so.
+  if ((capabilities.resources as { subscribe?: boolean } | undefined)?.subscribe !== true) {
+    throw new Error(`stdio must advertise resource subscriptions: ${JSON.stringify(capabilities)}`);
+  }
 
   // Tool registry: every domain tool + aggregates + history tools.
   const tools0 = await client.request('tools/list', {});
@@ -112,6 +116,13 @@ try {
 
   // A failed resource read renders like a failed tool call: the shared text carries
   // the code and, when upstream gave one, the requestId.
+  // Subscription handlers exist to be reached: the poller behind them is the thing
+  // candidate 5 gave a lifetime, and a capability nothing can call is a claim.
+  const subscribed = await client.request('resources/subscribe', { uri: `polestar://vehicle/${VIN}/telemetry/battery` });
+  if (subscribed.error) throw new Error(`resources/subscribe failed over stdio: ${JSON.stringify(subscribed.error)}`);
+  const unsubscribed = await client.request('resources/unsubscribe', { uri: `polestar://vehicle/${VIN}/telemetry/battery` });
+  if (unsubscribed.error) throw new Error(`resources/unsubscribe failed over stdio: ${JSON.stringify(unsubscribed.error)}`);
+
   const badRead = await client.request('resources/read', { uri: 'polestar://vehicle/NOTAVALIDVIN1234567/telemetry/battery' });
   const badText = JSON.stringify(badRead.result ?? badRead.error ?? {});
   if (!badText.includes('Polestar API error') || !/INVALID_VIN|VIN_NOT_FOUND|DATA_NOT_AVAILABLE|NOT_FOUND/.test(badText)) {

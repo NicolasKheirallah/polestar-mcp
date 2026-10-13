@@ -26,6 +26,7 @@ of these is what is meant.
 - Fixture mode is the default test path: `test/fixtures/dump/` is synthetic and needs no
   credential. Live capture goes through `npm run capture`, which writes the raw dump outside this
   tree on purpose; a raw capture holds a real VIN, a real token and real position history.
-- The API is read-only, so this server is read-only. `POLESTAR_ENABLE_WRITES` registers nothing.
+- The API is read-only, so this server is read-only. `POLESTAR_ENABLE_WRITES` registers nothing,
+  and `test/posture.test.ts` holds both statements along with the consumer-app-API boundary.
 - Writing hygiene is enforced by `node docs/check-docs.mjs hygiene` across the whole tree. Run it
   before pushing.

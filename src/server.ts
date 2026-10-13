@@ -48,7 +48,7 @@ export interface Engine {
   config: Config;
   budget: BudgetMeter;
   minute: MinuteWindowMeter;
-  cacheStats: CachingTransport['stats'] | undefined;
+  cacheStats: CachingTransport['stats'];
   client: PolestarClient;
   tokenProvider: TokenProvider;
   store?: HistoryStore | undefined;
@@ -68,7 +68,6 @@ export function buildEngine(env: NodeJS.ProcessEnv): Engine {
   const store = config.historyDir ? new HistoryStore(config.historyDir) : undefined;
 
   let transport: Transport;
-  let cacheStats: CachingTransport['stats'] | undefined;
   const base: Transport = config.fixturesDir
     ? new FixtureTransport(config.fixturesDir)
     : new HttpTransport(config.timeoutMs);
@@ -86,7 +85,7 @@ export function buildEngine(env: NodeJS.ProcessEnv): Engine {
     },
     disabled: config.cacheDisabled || (config.fixturesDir !== undefined && store === undefined),
   });
-  cacheStats = cache.stats;
+  const cacheStats = cache.stats;
   transport = cache;
 
   const tokenProvider = new TokenProvider(transport, {
@@ -159,6 +158,14 @@ export interface McpSurface {
 /** The poller's clock, so a test need not wait a minute. Same hooks subscriptions.ts takes. */
 export interface McpSurfaceOptions {
   pollerClock?: Pick<SubscriptionDeps, 'intervalMs' | 'setTimer' | 'clearTimer'>;
+  /**
+   * Whether this surface can keep a subscription alive. False for the stateless
+   * HTTP mode, where the surface is closed as the response ends: a poller whose
+   * first tick is a minute away can never fire, so accepting a subscribe request
+   * and dropping it silently is worse than not advertising the capability. Stdio
+   * defaults to true.
+   */
+  subscriptions?: boolean;
 }
 
 /**
@@ -168,6 +175,7 @@ export interface McpSurfaceOptions {
  * Every read tool carries readOnlyHint so clients can auto-approve.
  */
 export function createMcpServer(engine: Engine, options: McpSurfaceOptions = {}): McpSurface {
+  const subscriptionsAllowed = options.subscriptions !== false;
   const deps: ToolDeps = { client: engine.client, redactVin: engine.config.redactVin, vehicleLabels: engine.config.vehicleLabels, delegatedAccounts: engine.config.delegatedAccounts, units: engine.config.units };
 
   // The registry is built before the server that advertises it. The instructions
@@ -204,7 +212,7 @@ export function createMcpServer(engine: Engine, options: McpSurfaceOptions = {})
         'Every payload carries an age: charging configuration can be days old while telemetry is minutes old, so read the age before treating a value as current.',
         'Errors come back as structured JSON with a code, httpStatus and requestId. Quote the requestId when reporting a problem.',
       ].join(' '),
-      capabilities: { resources: { subscribe: true, listChanged: true }, logging: {} },
+      capabilities: { resources: { subscribe: subscriptionsAllowed, listChanged: true }, logging: {} },
     },
   );
 
@@ -228,7 +236,7 @@ export function createMcpServer(engine: Engine, options: McpSurfaceOptions = {})
     ...(options.pollerClock ?? {}),
   });
 
-  registerResources(server, engine, deps, subscriptions);
+  registerResources(server, engine, deps, subscriptions, subscriptionsAllowed);
   registerPrompts(server);
 
   return {
@@ -254,7 +262,13 @@ export function createMcpServer(engine: Engine, options: McpSurfaceOptions = {})
 
 const RESOURCE_KINDS = ['telemetry', 'charging'] as const;
 
-function registerResources(server: McpServer, engine: Engine, deps: ToolDeps, subscriptions: SubscriptionPoller): void {
+function registerResources(
+  server: McpServer,
+  engine: Engine,
+  deps: ToolDeps,
+  subscriptions: SubscriptionPoller,
+  subscriptionsAllowed: boolean,
+): void {
   const domainsOf = (kind: (typeof RESOURCE_KINDS)[number]): string[] =>
     DOMAINS.filter((d) => d.kind === kind).map((d) => d.name);
 
@@ -307,6 +321,10 @@ function registerResources(server: McpServer, engine: Engine, deps: ToolDeps, su
     );
   }
 
+  // Registered only where a subscription can actually outlive the request. The
+  // capability above is the other half of the same answer, so a client learns
+  // this from the handshake rather than from a subscription that never fires.
+  if (!subscriptionsAllowed) return;
   server.server.setRequestHandler('resources/subscribe', async (request: { params: { uri: string } }) => {
     await subscriptions.subscribe(request.params.uri);
     return {};
@@ -405,12 +423,14 @@ async function serveHttp(engine: Engine, port: number): Promise<void> {
       res.writeHead(401, { 'content-type': 'application/json', 'www-authenticate': 'Bearer' }).end(unauthenticatedBody());
       return;
     }
-    // Stateless mode: each request is an independent JSON-RPC exchange over
-    // one shared engine (cache, budget, history). Subscriptions are a stdio
-    // feature; HTTP serves tools, resources, and prompts.
+    // Stateless mode: each request is an independent JSON-RPC exchange over one
+    // shared engine (cache, budget, history). Tools, resources and prompts are
+    // served; subscriptions are not, and the surface below says so in its
+    // capabilities, because the surface that would poll is closed with this
+    // response and its notification channel goes with it.
     void (async () => {
       const transport = new NodeStreamableHTTPServerTransport({ enableJsonResponse: true });
-      const surface = createMcpServer(engine);
+      const surface = createMcpServer(engine, { subscriptions: false });
       res.on('close', () => {
         void transport.close();
         void surface.close();
@@ -427,7 +447,7 @@ async function serveHttp(engine: Engine, port: number): Promise<void> {
   await new Promise<void>((resolveListen) => guarded.listen(port, host, resolveListen));
   startSampler(engine);
   installShutdown(async () => { engine.sampler?.stop(); guarded.close(); }, engine.log);
-  engine.log(`HTTP mode: http://${host}:${port} (stateless; tools/resources/prompts, no subscriptions)`);
+  engine.log(`HTTP mode: http://${host}:${port} (stateless; tools, resources and prompts; no subscriptions)`);
 }
 
 /**

@@ -123,15 +123,27 @@ export class FixtureTransport implements Transport {
     return { status: capturedErrorStatus(body) ?? 200, body };
   }
 
-  /** The fixtures dir is operator config; still refuse to read outside it. */
+  /**
+   * The fixtures dir is operator config, so a lookup is still resolved against it
+   * rather than trusted. No route reaches this refusal today: every segment is
+   * either a literal or a registry name, and the fixture layout has no VIN
+   * directory. It is kept because that is a property of the routes, not of this
+   * function, and `isInside` below is what makes it testable rather than
+   * decorative.
+   */
   private containedPath(parts: string[]): string {
-    const root = path.resolve(this.rootDir);
-    const target = path.resolve(root, ...parts);
-    if (target !== root && !target.startsWith(root + path.sep)) {
+    const target = path.resolve(this.rootDir, ...parts);
+    if (!isInside(this.rootDir, target)) {
       throw new TransportError('Fixture lookup escaped the fixtures directory.', 'network');
     }
     return target;
   }
+}
+
+/** Whether `target` is `root` itself or sits inside it. */
+export function isInside(root: string, target: string): boolean {
+  const resolvedRoot = path.resolve(root);
+  return target === resolvedRoot || target.startsWith(resolvedRoot + path.sep);
 }
 
 function notFound(what: string): TransportResponse {

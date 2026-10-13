@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { PolestarApiError, PolestarClient, type DomainObservation } from '../src/client.js';
 import { TokenProvider } from '../src/auth.js';
-import { FixtureTransport } from '../src/transport.js';
+import { FixtureTransport, HttpTransport } from '../src/transport.js';
 import { domainPath, domainRequestPath } from '../src/domains.js';
 import { fileURLToPath } from 'node:url';
+import { createServer as createHttpServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { ScriptedTransport, tokenBody } from './helpers.js';
 
 const BASE = 'https://api.test/m2m';
@@ -300,4 +302,118 @@ test('resolveVin refuses to guess among several vehicles', async () => {
     return true;
   });
   assert.equal(await client.resolveVin(vins[1]), vins[1]);
+});
+
+test('a response labelled for another vehicle or another domain is refused, not shown', async () => {
+  // assertIdentity is the guard docs/architecture.md calls the one error this
+  // server must never make, and until now no test named either code, so the claim
+  // rested on reading the function. Presenting one car's telemetry as another's is
+  // the failure that cannot be walked back once it reaches a person.
+  const other = 'YSMTEST22PL000099';
+
+  const wrongCar = makeClient([
+    tokenBody('t'),
+    { status: 200, body: JSON.stringify({ data: { vin: VIN, batteryChargeLevelPercentage: 52 }, meta: { domain: 'battery', vin: other } }) },
+  ]);
+  await assert.rejects(
+    () => wrongCar.client.domain(VIN, 'telemetry', 'battery'),
+    (err: PolestarApiError) => err.code === 'VIN_MISMATCH' && /labelled YSMTEST22PL000099/.test(err.message),
+  );
+
+  // The payload repeats the VIN, and it is checked too: an Envelope can be right
+  // while the data inside it belongs to the car parked next to it.
+  const wrongPayload = makeClient([
+    tokenBody('t'),
+    { status: 200, body: JSON.stringify({ data: { vin: other, batteryChargeLevelPercentage: 52 }, meta: { domain: 'battery' } }) },
+  ]);
+  await assert.rejects(
+    () => wrongPayload.client.domain(VIN, 'telemetry', 'battery'),
+    (err: PolestarApiError) => err.code === 'VIN_MISMATCH' && /Response data is for/.test(err.message),
+  );
+
+  const wrongDomain = makeClient([
+    tokenBody('t'),
+    { status: 200, body: JSON.stringify({ data: { vin: VIN, odometerMeters: 1 }, meta: { domain: 'odometer', vin: VIN } }) },
+  ]);
+  await assert.rejects(
+    () => wrongDomain.client.domain(VIN, 'telemetry', 'battery'),
+    (err: PolestarApiError) => err.code === 'DOMAIN_MISMATCH' && /labelled telemetry\/odometer/.test(err.message),
+  );
+
+  // The case-insensitivity is deliberate: the API answers in whatever case the
+  // caller sent, and a mismatch that is only case would refuse a valid read.
+  const shouted = makeClient([
+    tokenBody('t'),
+    { status: 200, body: JSON.stringify({ data: { vin: VIN.toLowerCase(), batteryChargeLevelPercentage: 52 }, meta: { domain: 'BATTERY', vin: VIN.toLowerCase() } }) },
+  ]);
+  assert.equal((await shouted.client.domain(VIN, 'telemetry', 'battery'))?.batteryChargeLevelPercentage, 52);
+});
+
+test('a 404 that is not DATA_NOT_AVAILABLE stays an error', async () => {
+  // live-contract-findings.md records that a mistyped Domain answers
+  // VALIDATION_RESOURCE_NOT_FOUND while an unreported one answers
+  // DATA_NOT_AVAILABLE, and says treating the two alike would hide a bug in our own
+  // routing. Only the second half was tested.
+  const typo = makeClient([
+    tokenBody('t'),
+    { status: 404, body: JSON.stringify({ error: { code: 'VALIDATION_RESOURCE_NOT_FOUND', message: 'Unsupported telematics domain: batteri', httpStatus: 404 } }) },
+  ]);
+  await assert.rejects(
+    () => typo.client.domain(VIN, 'telemetry', 'batteri'),
+    (err: PolestarApiError) => err.code === 'VALIDATION_RESOURCE_NOT_FOUND' && err.httpStatus === 404,
+    'a typo is a contract error, not a car that reports nothing',
+  );
+
+  const absent = makeClient([
+    tokenBody('t'),
+    { status: 404, body: JSON.stringify({ error: { code: 'DATA_NOT_AVAILABLE', message: 'no data for this domain', httpStatus: 404 } }) },
+  ]);
+  assert.equal(await absent.client.domain(VIN, 'telemetry', 'is-at-charge-location'), null, 'and an absence is not an error');
+});
+
+test('the requests that leave the process are reads and one token exchange', async () => {
+  // The API is read-only, so this server is read-only: the first claim in
+  // docs/write-endpoints.md. It is only true of the bytes that reach a socket, and a
+  // scripted transport hides the method entirely, so this one listens on a real port
+  // and records what arrives.
+  const seen: { method: string; url: string }[] = [];
+  const endpoint = createHttpServer((req, res) => {
+    seen.push({ method: req.method ?? '', url: req.url ?? '' });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(
+      req.url === '/token'
+        ? tokenBody('t').body
+        : JSON.stringify({ data: { batteryChargeLevelPercentage: 52 }, meta: { domain: 'battery', vin: VIN } }),
+    );
+  });
+  await new Promise<void>((ready) => endpoint.listen(0, '127.0.0.1', ready));
+  const port = (endpoint.address() as AddressInfo).port;
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const transport = new HttpTransport(5_000);
+    const tp = new TokenProvider(transport, { tokenUrl: `${base}/token`, clientId: 'oauth-client', clientSecret: 'secret' });
+    await new PolestarClient(tp, transport, { baseUrl: base, accountId: 'account-1' }).domain(VIN, 'telemetry', 'battery');
+  } finally {
+    endpoint.close();
+  }
+
+  assert.deepEqual(seen.map((c) => c.method), ['POST', 'GET'], 'the token exchange, then one read');
+  assert.deepEqual(seen.filter((c) => c.method !== 'GET').map((c) => c.url), ['/token'], 'nothing but the token exchange is anything other than a GET');
+  assert.equal(seen.length, 2, 'and nothing else is probed first');
+});
+
+test('switching to a delegated account costs no extra request', async () => {
+  // The API answers 200 for an x-delegated-account-id that does not exist, so
+  // delegation cannot be validated by probing: the server sends the header and reads.
+  // A well-meaning "check the account first" call would double every delegated read
+  // and teach the caller nothing.
+  const { client, transport } = makeClient([
+    tokenBody('t'),
+    { status: 200, body: JSON.stringify({ data: { batteryChargeLevelPercentage: 52 }, meta: { domain: 'battery', vin: VIN } }) },
+  ], { delegatedAccountId: 'partner-a' });
+  await client.domain(VIN, 'telemetry', 'battery');
+
+  const reads = transport.calls.filter((c) => !c.url.endsWith('/token'));
+  assert.equal(reads.length, 1, 'the header and the read are one request');
+  assert.equal(reads[0]!.request.headers?.['x-delegated-account-id'], 'partner-a', 'the header travels with the read, not before it');
 });

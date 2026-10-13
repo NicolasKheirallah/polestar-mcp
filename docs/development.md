@@ -36,9 +36,13 @@ polestar-mcp/
   test/
     auth.test.ts         token lifecycle
     client.test.ts       envelope, headers, VINs, identity, errors
-    runtime.test.ts      cache, retry, budget behavior
+    runtime.test.ts      cache, retry, budget, history store, sampler, fixtures seam
+    contract.test.ts     the fixture dump against every Domain's pinned keys
     planner.test.ts      charge-window math including wrap-around
+    charge-model.test.ts power, capacity and charge-time arithmetic
     config-registry.test.ts  variables, validation, unknown detection
+    server-seams.test.ts the surface, its poller's lifetime, the status tool's arithmetic
+    posture.test.ts      what the server refuses to do: writes, the consumer app API
     helpers.ts           ScriptedTransport for scripted responses
     fixtures/dump/       a small sanitized dump for tests
   scripts/

@@ -8,6 +8,10 @@ The captured dump proves the Polestar consumer app API yields three things the o
 2. **Car renders.** GraphQL `GetCarImages` returns 6 angles of the exact specced car, opaque JPG plus transparent PNG, from car-images.polestar.com.
 3. **App-side telematics.** `CarTelematicsV2` mirrors M2M battery, health, and odometer (kept as fallback only).
 
+Nothing in `src/` or `scripts/` names the three hosts or the three GraphQL documents below, and
+`POLESTAR_CONSUMER_REFRESH_TOKEN` is not in the configuration registry: `test/posture.test.ts`
+checks both, against the same patterns that match this file.
+
 ## Why it is not wired in
 
 - **Unofficial and undocumented.** The GraphQL query documents are not published; the dump holds responses, not requests. Reconstructing queries without the schema would be guesswork that breaks silently.

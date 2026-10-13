@@ -10,6 +10,11 @@ All notable changes to this project. The format follows
 - The handbook's live probe findings, consumer API design note, and write endpoint
   safety design as markdown docs: `docs/live-contract-findings.md`,
   `docs/consumer-adapter-note.md`, `docs/write-endpoints.md`.
+- `test/posture.test.ts`, which holds the two rules this server is defined by: that
+  `POLESTAR_ENABLE_WRITES` still registers nothing, and that the consumer app API the
+  captured dump proves works stays a design note. Both carry positive controls.
+- `UNKNOWN_DOMAIN`, a minted code for a Domain named to `get_history` that the registry
+  does not have. `list_domains` is named in its hint, as for every minted code.
 
 ### Changed
 
@@ -25,11 +30,35 @@ All notable changes to this project. The format follows
 
 ### Fixed
 
+- `resources/subscribe` was accepted over stateless HTTP and could never be delivered: the
+  surface that would poll is closed as its response ends, so its first tick a minute later
+  fired into a closed transport. HTTP mode now advertises `subscribe: false` and does not
+  register the two handlers. The smoke run asserts the refusal, and the stdio run now
+  subscribes and unsubscribes for real.
+- `polestar_status` reported `Cache: off (fixture mode serves local files)` from a branch that
+  could not be reached: the engine always had a cache, so the test for `undefined` never
+  succeeded, and the sentence was wrong anyway (fixture mode with history on caches). The
+  cache now says whether it is on, and the arithmetic in that line, the budget line and the
+  token clock are asserted rather than only the tool's name.
+- `get_history` answered "No history records matched." for a Domain the registry does not
+  have, because it re-spelled the Domain route with its own regex instead of asking the
+  registry. It is now an `UNKNOWN_DOMAIN` error, distinct from a car that reported nothing.
+- Two clocks bypassed the injected one: the token expiry in `polestar_status` and the three
+  look-back windows in the history tools read `Date.now()` directly, so no test could place
+  them. Both read `ToolDeps.nowMs` now.
 - HTTP mode appended a subscription poller per request to a module-level list that only
   `SIGTERM` could drain. An MCP surface now owns the pollers it starts and stops them when it
   closes, which is what the response teardown already did for the transport.
 - A stopped subscription poller left its targets in the map, so a restarted poller for the
   same URI was treated as still subscribed.
+
+### Verification
+
+- Twelve claims that had nothing that could fail now do. Each new check was confirmed by
+  breaking the protection it describes and watching it fail, one at a time.
+- The fixtures containment refusal is kept and now testable: `isInside` is exported and
+  asserted directly, with an honest note that no route reaches it today, because every path
+  segment is a literal or a registry name.
 
 ### Removed
 

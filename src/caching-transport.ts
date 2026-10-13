@@ -2,6 +2,8 @@ import type { Transport, TransportRequest, TransportResponse } from './transport
 import { findDomain, parseDomainPath, VEHICLES_PATH, VEHICLES_TTL_MS } from './domains.js';
 
 export interface CacheStats {
+  /** False when the cache was constructed disabled, so polestar_status can say so. */
+  enabled: boolean;
   hits: number;
   misses: number;
   /** Responses served from an expired entry while a refresh was in flight. */
@@ -59,13 +61,14 @@ export class CachingTransport implements Transport {
   private readonly entries = new Map<string, CacheEntry>();
   private readonly inflight = new Map<string, Promise<TransportResponse>>();
   private readonly now: () => number;
-  readonly stats: CacheStats = { hits: 0, misses: 0, staleServed: 0, refreshes: 0, entries: 0 };
+  readonly stats: CacheStats;
 
   constructor(
     private readonly inner: Transport,
     private readonly opts: CachingTransportOptions = {},
   ) {
     this.now = opts.now ?? Date.now;
+    this.stats = { enabled: opts.disabled !== true, hits: 0, misses: 0, staleServed: 0, refreshes: 0, entries: 0 };
   }
 
   async fetch(url: string, request: TransportRequest = {}): Promise<TransportResponse> {

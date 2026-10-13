@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, truncateSync } from 'node:fs';
 import { PolestarApiError } from '../src/client.js';
 import { describeError, errorResult } from '../src/tool-output.js';
 import { clientFor, readDomain, readDomainFormatted } from '../src/vehicle-read.js';
 import { MINTED_CODES, toFailure } from '../src/failure.js';
-import { HttpTransport } from '../src/transport.js';
+import { HttpTransport, isInside } from '../src/transport.js';
 import { DOMAINS } from '../src/domains.js';
 import { domainToolSpecs } from '../src/domain-tools.js';
 import { aggregateToolSpecs } from '../src/aggregate-tools.js';
@@ -746,4 +746,188 @@ test('a failed background refresh is reported instead of vanishing', async () =>
   await new Promise((r) => setImmediate(r));
   assert.equal(reported.length, 1, `the failed refresh must surface exactly once, saw ${reported.length}`);
   assert.match(reported[0] ?? '', /telemetry\/battery: budget exhausted/);
+});
+
+test('raw: true appends the payload, and a domain with no summarizer does it anyway', async () => {
+  // The whole raw branch and the summaryLines === null fallback beside it were
+  // untested: nothing said whether `raw` printed the payload twice, or whether a
+  // Domain that joins the registry without a summarizer would still be readable.
+  const vin = 'YSMTEST22PL000001';
+  const payload = { vin, metaReceivedAt: '2026-01-01T00:00:00.000Z', batteryChargeLevelPercentage: 61 };
+  const client = {
+    async resolveVin(v?: string) { return v ?? vin; },
+    async vehicles() { return [vin]; },
+    async domain() { return payload; },
+  } as unknown as PolestarClient;
+  const deps = { client, redactVin: false, vehicleLabels: {}, delegatedAccounts: [], units: 'km' } as ToolDeps;
+
+  const summarized = await readDomainFormatted(deps, BATTERY, {}, {});
+  assert.doesNotMatch(summarized.content[0]!.text, /Raw payload:/, 'a summary alone is the default');
+  assert.match(summarized.content[0]!.text, /Charge: 61%/);
+  assert.equal(summarized.structuredContent?.data, undefined, 'the envelope stays lean unless asked');
+
+  const raw = await readDomainFormatted(deps, BATTERY, { raw: true }, {});
+  assert.match(raw.content[0]!.text, /Raw payload:/);
+  assert.match(raw.content[0]!.text, /"batteryChargeLevelPercentage": 61/);
+  assert.deepEqual(raw.structuredContent?.data, payload, 'the untouched payload reaches the envelope');
+
+  // test/contract.test.ts is what keeps a real Domain from landing here, so this
+  // drives the fallback the way only an unsummarized Domain could.
+  const unsummarized = await readDomainFormatted(deps, { kind: 'telemetry', name: 'not-a-domain', scope: 'pdp-telemetry/not-a-domain' }, {}, {});
+  assert.match(unsummarized.content[0]!.text, /Raw payload:/, 'no summarizer means the payload, not an empty answer');
+  assert.match(unsummarized.content[0]!.text, /Vehicle YSMTEST22PL000001, telemetry\/not-a-domain/);
+});
+
+test('a pre-supplied answer is used on the retry instead of asking again', async () => {
+  // The 2026-07-28 flow carries the answer to a previous elicitation in the retry's
+  // inputResponses. Only accept, decline and refusal were covered, so the continue
+  // path had nothing that could fail: a second question would have been asked, and
+  // the client would have been asked to answer the same thing twice.
+  const vin = 'YSMTEST22PL000001';
+  const asked: string[] = [];
+  const read: string[] = [];
+  const client = {
+    async resolveVin(v?: string) {
+      if (v === undefined) throw new PolestarApiError('AMBIGUOUS_VIN', 'this credential sees two vehicles', 400);
+      return v;
+    },
+    async vehicles() { return [vin, 'YSMTEST22PL000002']; },
+    async domain(_vin: string) { read.push(_vin); return { batteryChargeLevelPercentage: 61, metaReceivedAt: '2026-01-01T00:00:00.000Z' }; },
+  } as unknown as PolestarClient;
+  const deps = { client, redactVin: false, vehicleLabels: {}, delegatedAccounts: [], units: 'km' } as ToolDeps;
+  const ctx = {
+    mcpReq: {
+      elicitInput: async () => { asked.push('asked'); return { action: 'accept', content: { vin } }; },
+      // The shape the protocol carries: one view per request key, with the action
+      // the client took and the content it accepted.
+      inputResponses: { 'pick-vehicle-battery': { kind: 'elicit', action: 'accept', content: { vin } } },
+    },
+  };
+
+  const result = await readDomainFormatted(deps, BATTERY, {}, ctx);
+
+  assert.equal(result.structuredContent?.ok, true);
+  assert.deepEqual(asked, [], 'the answer already given is not asked for again');
+  assert.deepEqual(read, [vin], 'and the read is the vehicle that answer named');
+});
+
+test('get_history answers for a registered Domain and names an unregistered one', async () => {
+  // The one tool with no coverage at all: `domain` is required, so the smoke run
+  // never calls it. It also re-spelled the Domain route with its own regex and then
+  // handed whatever it matched to the store, so a typo read as "no history records
+  // matched" and looked exactly like a car that had never reported anything.
+  const vin = 'YSMTEST22PL000001';
+  const dir = mkdtempSync(path.join(tmpdir(), 'polestar-get-history-'));
+  const store = new HistoryStore(dir);
+  const nowMs = Date.parse('2026-01-01T12:00:00Z');
+  store.append(vin, 'telemetry', 'battery', { observedAt: nowMs - 7_200_000, metaEventId: 'e1', data: { batteryChargeLevelPercentage: 52, estimatedDistanceToEmptyKm: 170, interiorTemperatureCelsius: 21 } });
+  store.append(vin, 'telemetry', 'battery', { observedAt: nowMs - 60_000, metaEventId: 'e2', data: { batteryChargeLevelPercentage: 54 } });
+
+  const client = {
+    async resolveVin(v?: string) { return v ?? vin; },
+    async vehicles() { return [vin]; },
+    async domain() { return null; },
+  } as unknown as PolestarClient;
+  const deps = { client, redactVin: false, vehicleLabels: {}, delegatedAccounts: [], units: 'km', nowMs: () => nowMs } as ToolDeps;
+  const specs = historyToolSpecs({ ...deps, store });
+  const call = async (args: Record<string, unknown>) => toolSpec(specs, 'get_history').run(args, {});
+
+  const all = await call({ domain: 'telemetry/battery' });
+  assert.equal(all.isError, undefined);
+  const lines = all.content[0]!.text.trim().split('\n');
+  assert.equal(lines.length, 2, 'one line per recorded change');
+  assert.match(lines[0]!, /^2026-01-01T11:59:00\.000Z \{.*"batteryChargeLevelPercentage":54.*\}$/, 'newest first');
+  // Only the fields an agent reasons about; the rest of the payload is not repeated.
+  assert.doesNotMatch(all.content[0]!.text, /interiorTemperatureCelsius/);
+
+  // `hours` is a look-back from the injected clock, not from the wall clock.
+  const recent = await call({ domain: 'telemetry/battery', hours: 1 });
+  assert.equal(recent.content[0]!.text.trim().split('\n').length, 1, 'the older sample is outside the window');
+
+  for (const bad of ['telemetry/nope', 'nope/battery', 'battery']) {
+    const refused = await call({ domain: bad });
+    assert.equal(refused.isError, true, `${bad} is not a Domain and must not read as an empty history`);
+    assert.match(refused.content[0]!.text, /UNKNOWN_DOMAIN/);
+    assert.match(String(refused.structuredContent?.hint), /list_domains/);
+  }
+
+  // A registered Domain with nothing recorded is a normal empty answer, not an error.
+  const empty = await call({ domain: 'telemetry/health' });
+  assert.equal(empty.isError, undefined);
+  assert.equal(empty.content[0]!.text, 'No history records matched.');
+});
+
+test('the history store refuses to read a file it should not hold in memory', async () => {
+  // CONTRIBUTING cites this guard as the exemplary "wired, not promised" one, and
+  // nothing exercised it. A file is read whole, so the refusal is the difference
+  // between a slow tool call and a stalled server.
+  const vin = 'YSMTEST22PL000001';
+  const dir = mkdtempSync(path.join(tmpdir(), 'polestar-history-big-'));
+  const store = new HistoryStore(dir);
+  store.append(vin, 'telemetry', 'battery', { observedAt: 1, metaEventId: 'e1', data: { soc: 50 } });
+  const file = path.join(dir, vin, 'telemetry-battery.jsonl');
+
+  // Sparse, so the test costs a stat rather than 64 MB of disk.
+  truncateSync(file, 64 * 1024 * 1024 + 1);
+  assert.throws(
+    () => store.query(vin, 'telemetry', 'battery'),
+    /is larger than 67108864 bytes; prune it before querying/,
+  );
+
+  // One byte under the limit still reads, so the guard is a threshold and not a
+  // blanket refusal of a large-but-legal file.
+  truncateSync(file, 64 * 1024 * 1024);
+  assert.equal(store.query(vin, 'telemetry', 'battery').length, 1, 'the last good line survives');
+});
+
+test('the sampler stands down when the daily budget runs low', async () => {
+  // Checked once per round and never exercised: the existing test ran with a full
+  // budget, so isLow(0.8) was always false and this branch had never executed.
+  const sampled: string[] = [];
+  const logged: string[] = [];
+  const fractions: number[] = [];
+  const budget = {
+    isLow(fraction: number) { fractions.push(fraction); return true; },
+    snapshot: () => ({ used: 8_500, limit: 10_000, remaining: 1_500, fractionUsed: 0.85, resetsAtUtc: 'soon' }),
+  } as unknown as BudgetMeter;
+  const sampler = new HistorySampler(
+    { vehicles: async () => ['YSMTEST22PL000001'] } as unknown as PolestarClient,
+    budget,
+    async (vin) => { sampled.push(vin); },
+    // The first wait resolves so the round runs; the second never does, which bounds
+    // this test to one round whether or not the guard is there. With an always-ready
+    // sleep, a missing guard turns the round into an unbreakable chain of microtasks
+    // that starves the assertions below instead of failing them.
+    {
+      intervalSeconds: 60,
+      sleep: (() => {
+        let waits = 0;
+        return async () => {
+          waits += 1;
+          if (waits > 1) await new Promise<void>(() => undefined);
+        };
+      })(),
+      log: (m) => logged.push(m),
+    },
+  );
+
+  await sampler.start();
+  for (let i = 0; i < 50 && logged.length === 0; i += 1) await new Promise((r) => setImmediate(r));
+  sampler.stop();
+
+  assert.deepEqual(sampled, [], 'a low budget means the round issues no calls at all');
+  assert.deepEqual(fractions, [0.8], 'and it consults the guard it was configured with');
+  assert.match(logged[0] ?? '', /sampler standing down: 85% of daily budget spent/);
+});
+
+test('the fixtures containment check refuses anything outside the dump', () => {
+  // No route reaches this refusal today: every fixture path segment is a literal or
+  // a registry name, and the dump layout has no VIN directory. That is a property of
+  // the routes, not of the check, so the check is tested directly rather than left
+  // as decoration that nothing can exercise.
+  const root = '/tmp/dump';
+  assert.equal(isInside(root, path.join(root, 'dataportal', 'battery.json')), true);
+  assert.equal(isInside(root, root), true, 'the root itself is inside itself');
+  assert.equal(isInside(root, path.resolve(root, '..', 'etc', 'passwd')), false);
+  assert.equal(isInside(root, `${root}-elsewhere/x.json`), false, 'a sibling that merely shares a prefix is not inside');
 });

@@ -24,13 +24,15 @@ Consequences: the Account ID is a separate identifier and is required; the clien
 
 So VIN format checking exists only where we put it (the tool input schema), and any unauthorized or typo'd VIN reads as an authorization failure. The hint for `AUTHZ_VIN_UNAUTHORIZED` mentions both cases.
 
+Because an unknown delegated ID is accepted, the server never probes for one: it sends `x-delegated-account-id` and reads, one request either way. `test/client.test.ts` asserts that the whole exchange is two requests, a POST to the token endpoint and one GET, so a validation call added later is a test failure and not a slower server.
+
 ## Domain list
 
 | Request | Result |
 | --- | --- |
 | `/v1/vehicles/{vin}/telemetry/not-a-real-domain` | `404 VALIDATION_RESOURCE_NOT_FOUND`: "Unsupported telematics domain: ..." |
 
-`VALIDATION_RESOURCE_NOT_FOUND` is not `DATA_NOT_AVAILABLE`. A mistyped domain is a contract error, not an empty report; treating the two alike would hide a bug in our own routing.
+`VALIDATION_RESOURCE_NOT_FOUND` is not `DATA_NOT_AVAILABLE`. A mistyped domain is a contract error, not an empty report; treating the two alike would hide a bug in our own routing. `test/client.test.ts` holds both halves: a 404 with the first code rejects and keeps its code, one with the second answers "no data".
 
 ## Live domain scan, single authorized vehicle
 

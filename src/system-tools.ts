@@ -7,7 +7,7 @@ export interface SystemDeps extends ToolDeps {
   budget: BudgetMeter;
   /** Rolling per-minute ceiling, reported next to the daily budget. */
   minute: MinuteWindowMeter;
-  cacheStats: CacheStats | undefined;
+  cacheStats: CacheStats;
   /** Epoch ms when the current access token stops being trusted. */
   tokenExpiresAt: () => number | undefined;
   fixtureMode: boolean;
@@ -44,19 +44,22 @@ export function systemToolSpecs(deps: SystemDeps): ToolSpec[] {
         // Sampling spends the same daily budget as an agent's questions, so an
         // operator has to be able to see it is happening without reading stderr.
         if (deps.sampler !== undefined) lines.push(`Background sampling: ${deps.sampler.describe()}`);
-        if (cache !== undefined) {
+        if (cache.enabled) {
           const totalReads = cache.hits + cache.staleServed + cache.misses;
           const hitRate = totalReads === 0 ? 0 : Math.round(((cache.hits + cache.staleServed) / totalReads) * 100);
           lines.push(
             `Cache: ${cache.hits} hits + ${cache.staleServed} stale-served of ${totalReads} reads (${hitRate}%), ${cache.misses} live misses, ${cache.refreshes} refreshes, ${cache.entries} entries`,
           );
         } else {
-          lines.push('Cache: off (fixture mode serves local files)');
+          lines.push('Cache: off (POLESTAR_CACHE_DISABLED, or fixture mode without a history store)');
         }
         const expiresAt = deps.tokenExpiresAt();
+        // The clock is injected like every other one this server reads, so the
+        // reported expiry can be asserted instead of drifting with the wall.
+        const nowMs = deps.nowMs?.() ?? Date.now();
         lines.push(
           expiresAt !== undefined
-            ? `Token: trusted ~${Math.max(0, Math.round((expiresAt - Date.now()) / 60_000))} more min`
+            ? `Token: trusted ~${Math.max(0, Math.round((expiresAt - nowMs) / 60_000))} more min`
             : 'Token: not yet issued',
         );
         return text(lines.join('\n'));

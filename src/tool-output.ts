@@ -111,6 +111,7 @@ const MINTED_HINTS: Record<MintedCode, string> = {
   NO_VEHICLES: 'The credential authorizes no vehicle at all; check the Data Portal sharing setup rather than retrying.',
   VIN_MISMATCH: 'The response was labelled a different vehicle than the one asked for, so it was not shown. Report the requestId; do not retry against a different car.',
   DOMAIN_MISMATCH: 'The response was labelled a different domain than the one asked for, so it was not shown. Report the requestId.',
+  UNKNOWN_DOMAIN: 'That Domain is not in the registry. list_domains enumerates every one as kind/name.',
   DELEGATION_NOT_ALLOWED: 'List the account in POLESTAR_DELEGATED_ACCOUNT_IDS to let callers switch to it; the API does not reject an unknown delegation, so this server checks it.',
   LOCATION_DISALLOWED: 'Position is disabled by POLESTAR_ALLOW_LOCATION=false and the vehicle was never queried. Enable it only at the owner\u2019s request.',
   BAD_RESPONSE: 'The API returned an unexpected body; retry once, then report the requestId.',

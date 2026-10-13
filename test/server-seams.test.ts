@@ -186,7 +186,7 @@ test('polestar_status prints what the sampler says, and nothing when there is no
     units: 'km' as const,
     budget: { snapshot: () => ({ used: 0, limit: 10_000, remaining: 10_000, fractionUsed: 0, resetsAtUtc: 'soon' }) },
     minute: { snapshot: () => ({ used: 0, limit: 100 }) },
-    cacheStats: undefined,
+    cacheStats: { enabled: true, hits: 0, staleServed: 0, misses: 0, refreshes: 0, entries: 0 },
     tokenExpiresAt: () => undefined,
     fixtureMode: true,
   };
@@ -210,6 +210,48 @@ test('polestar_status prints what the sampler says, and nothing when there is no
   assert.doesNotMatch(without.content[0]!.text, /Background sampling/, 'no sampler, no line');
 });
 
+test('polestar_status reports the budget arithmetic, the hit rate and the token clock', async () => {
+  // Four snapshots concatenated, and only the tool's name was ever asserted. The
+  // hit rate is arithmetic on three counters, the reset time is the budget's, and
+  // the expiry is a subtraction against a clock, so each of them can be wrong on
+  // its own.
+  const nowMs = Date.parse('2026-01-01T12:00:00Z');
+  const deps = {
+    client: {} as unknown as PolestarClient,
+    redactVin: false,
+    vehicleLabels: {},
+    delegatedAccounts: [],
+    units: 'km' as const,
+    budget: { snapshot: () => ({ used: 2_500, limit: 10_000, remaining: 7_500, fractionUsed: 0.25, resetsAtUtc: '2026-01-02T00:00:00Z' }) },
+    minute: { snapshot: () => ({ used: 12, limit: 100 }) },
+    cacheStats: { enabled: true, hits: 6, staleServed: 2, misses: 2, refreshes: 1, entries: 4 },
+    tokenExpiresAt: () => nowMs + 12 * 60_000,
+    fixtureMode: false,
+    nowMs: () => nowMs,
+  };
+  const report = async (over: Record<string, unknown> = {}): Promise<string> =>
+    (await toolSpec(systemToolSpecs({ ...deps, ...over } as never), 'polestar_status').run({}, {})).content[0]!.text;
+
+  const text = await report();
+  assert.match(text, /Mode: live/);
+  assert.match(text, /API budget: 2500\/10000 used \(7500 left\), resets 2026-01-02T00:00:00Z/);
+  assert.match(text, /Per-minute ceiling: 12\/100 used in this minute/);
+  // 6 hits plus 2 stale-served out of 10 reads.
+  assert.match(text, /Cache: 6 hits \+ 2 stale-served of 10 reads \(80%\), 2 live misses, 1 refreshes, 4 entries/);
+  assert.match(text, /Token: trusted ~12 more min/);
+
+  // No reads yet is a rate of zero, not a division by zero.
+  const cold = await report({ cacheStats: { enabled: true, hits: 0, staleServed: 0, misses: 0, refreshes: 0, entries: 0 } });
+  assert.match(cold, /of 0 reads \(0%\)/, 'a cold cache reads as zero percent rather than NaN');
+
+  // An expired-but-unspent budget is still worth naming, and a cache that is off
+  // says so instead of printing counters no read can move.
+  assert.match(await report({ tokenExpiresAt: () => undefined }), /Token: not yet issued/);
+  const off = await report({ cacheStats: { enabled: false, hits: 0, staleServed: 0, misses: 0, refreshes: 0, entries: 0 } });
+  assert.match(off, /Cache: off \(POLESTAR_CACHE_DISABLED/);
+  assert.doesNotMatch(off, /stale-served/, 'an off cache prints no hit rate');
+});
+
 test('the prompts and the registry agree on every tool name', async () => {
   const deps = {
     client: {} as unknown as PolestarClient,
@@ -225,7 +267,7 @@ test('the prompts and the registry agree on every tool name', async () => {
       ...deps,
       budget: {},
       minute: {},
-      cacheStats: undefined,
+      cacheStats: { enabled: true, hits: 0, staleServed: 0, misses: 0, refreshes: 0, entries: 0 },
       tokenExpiresAt: () => undefined,
       fixtureMode: false,
     } as never),

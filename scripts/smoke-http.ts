@@ -10,12 +10,16 @@ import path from 'node:path';
 const PROJECT_ROOT = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const PORT = 18493;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+const TOKEN = 'smoke-http-token';
 
 const child = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts', '--http'], {
   cwd: PROJECT_ROOT,
   env: {
     ...process.env,
     POLESTAR_HTTP_PORT: String(PORT),
+    // A token is required so the bearer check itself is exercised: it was reachable
+    // only by spawning a process, and nothing spawned one with a token at all.
+    POLESTAR_HTTP_TOKEN: TOKEN,
     POLESTAR_FIXTURES_DIR: path.join(PROJECT_ROOT, 'test', 'fixtures', 'dump'),
   },
   stdio: ['ignore', 'ignore', 'pipe'],
@@ -23,10 +27,13 @@ const child = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts', '--ht
 let stderr = '';
 child.stderr.on('data', (c: Buffer) => (stderr += c.toString()));
 
-async function post(body: unknown): Promise<{ result?: Record<string, unknown>; error?: { code: number; message: string }; id?: number }> {
+async function post(
+  body: unknown,
+  headers: Record<string, string> = { authorization: `Bearer ${TOKEN}` },
+): Promise<{ result?: Record<string, unknown>; error?: { code: number; message: string }; id?: number }> {
   const res = await fetch(BASE_URL, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers },
     body: JSON.stringify(body),
   });
   const text = await res.text();
@@ -54,6 +61,15 @@ try {
   if ((init.result?.serverInfo as { name?: string } | undefined)?.name !== 'polestar-mcp') {
     throw new Error(`handshake failed: ${JSON.stringify(init).slice(0, 200)}`);
   }
+  // Stateless: the surface that would poll is closed with this response, so the
+  // capability says no rather than accepting a subscription that can never fire.
+  if ((init.result?.capabilities as { resources?: { subscribe?: boolean } } | undefined)?.resources?.subscribe !== false) {
+    throw new Error(`stateless HTTP must not advertise subscriptions: ${JSON.stringify(init.result?.capabilities)}`);
+  }
+  const subscribe = await post({ jsonrpc: '2.0', id: 9, method: 'resources/subscribe', params: { uri: 'polestar://vehicle/X/telemetry/battery' } });
+  if (subscribe.error === undefined) {
+    throw new Error('resources/subscribe was accepted over stateless HTTP, where it can never be delivered');
+  }
 
   const tools = await post({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
   const toolCount = ((tools.result?.tools as unknown[] | undefined) ?? []).length;
@@ -68,6 +84,31 @@ try {
   const resources = await post({ jsonrpc: '2.0', id: 4, method: 'resources/list', params: {} });
   if (!Array.isArray(resources.result?.resources) || (resources.result!.resources as unknown[]).length === 0) {
     throw new Error('resources/list over HTTP returned nothing');
+  }
+
+  // The bearer check and its body, which nothing exercised before: a caller that
+  // forgets the header has to be told what to send, not answered as an anonymous read.
+  for (const [label, headers] of [
+    ['no Authorization header', {}],
+    ['the wrong token', { authorization: 'Bearer not-the-token' }],
+  ] as const) {
+    const denied = await fetch(BASE_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 10, method: 'tools/list', params: {} }),
+    });
+    if (denied.status !== 401) throw new Error(`${label} answered ${denied.status}, not 401`);
+    if (denied.headers.get('www-authenticate') !== 'Bearer') {
+      throw new Error(`${label} did not challenge with www-authenticate: Bearer`);
+    }
+    const body = await denied.text();
+    if (!body.includes('UNAUTHENTICATED') || !body.includes('POLESTAR_HTTP_TOKEN')) {
+      throw new Error(`${label} got an unhelpful 401 body: ${body.slice(0, 200)}`);
+    }
+  }
+  // And the token we do have still works, so the check is not simply refusing everything.
+  if ((await post({ jsonrpc: '2.0', id: 11, method: 'tools/list', params: {} })).result === undefined) {
+    throw new Error('a valid bearer token was refused');
   }
 
   child.kill('SIGTERM');

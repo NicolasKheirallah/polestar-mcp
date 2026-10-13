@@ -31,9 +31,12 @@ export interface ToolSpec<A extends object = Record<string, unknown>> {
 }
 
 /**
- * The only place in the tree that touches the SDK's registration surface. Every
- * tool declares the same output envelope, so that fact lives here instead of in
- * twenty-six object literals.
+ * The one place that registers a tool. Resources, prompts and the two
+ * subscription handlers are registered next to the code that owns them, in
+ * server.ts; what lives here is the part every tool must declare identically,
+ * so the output envelope is written once instead of in twenty-six literals.
+ * The smoke run asserts an outputSchema on every registered name, which is what
+ * makes a tool registered around this function visible rather than silent.
  */
 export function registerTools(server: McpServer, specs: ToolSpec[]): void {
   for (const spec of specs) {

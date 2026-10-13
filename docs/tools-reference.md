@@ -100,7 +100,7 @@ The aggregates exist because the questions people actually ask span several doma
 
 Registered only when the server runs with a history directory (`POLESTAR_HISTORY_DIR`). They answer the longitudinal questions the stateless API cannot:
 
-- `get_history`: raw recorded samples for one domain, one line per change, newest first. Duplicates (same cloud `metaEventId`) are never stored twice.
+- `get_history`: raw recorded samples for one domain, one line per change, newest first. Duplicates (same cloud `metaEventId`) are never stored twice. The domain is checked against the registry first, so a name no Domain has is an `UNKNOWN_DOMAIN` error naming `list_domains` rather than an empty history that looks like a car that reported nothing.
 - `get_degradation_report`: the trend of the battery's implied full-charge range (range divided by SoC) and implied pack capacity over recorded history, presented as a series of estimates rather than a single verdict. Needs at least 5 recorded samples.
 - `get_charging_sessions`: charging sessions reconstructed from recorded battery samples: start, duration, peak power, and the maximum charge level reached.
 
