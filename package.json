@@ -37,7 +37,7 @@
     "@modelcontextprotocol/node": "^2.1.1"
   },
   "devDependencies": {
-    "@types/node": "^26.6.4",
+    "@types/node": "^26.6.6",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
