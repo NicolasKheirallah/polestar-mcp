@@ -237,6 +237,17 @@ export function historyToolSpecs(deps: HistoryDeps): ToolSpec[] {
         const asked = args?.domain ?? '';
         const slash = asked.indexOf('/');
         const spec = slash < 0 ? undefined : findDomain(asked.slice(0, slash), asked.slice(slash + 1));
+        // Position history is the one stored domain the location switch must
+        // also cover: the tool reads the local store, so the client-side check
+        // that guards every live read never runs for it. Refuse before the query
+        // so the answer cannot render coordinates the operator disabled.
+        if (spec !== undefined && spec.kind === 'telemetry' && spec.name === 'location' && deps.allowLocation === false) {
+          throw new PolestarApiError(
+            'LOCATION_DISALLOWED',
+            'Position history is disabled for this server (POLESTAR_ALLOW_LOCATION=false); the store query was refused.',
+            400,
+          );
+        }
         if (spec === undefined) {
           throw new PolestarApiError(
             'UNKNOWN_DOMAIN',

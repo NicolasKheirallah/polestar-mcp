@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createMcpHandler, McpServer, ProtocolError, ProtocolErrorCode, ResourceTemplate } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { createStdioInputFilter } from './stdio-filter.js';
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { TokenProvider } from './auth.js';
@@ -30,8 +31,8 @@ import { valueObservedAtMs } from './domain-data.js';
 import { z } from 'zod';
 import { FixtureTransport, HttpTransport, type Transport } from './transport.js';
 import { RetryingTransport } from './retrying-transport.js';
-import { resultText, type ToolDeps } from './tool-output.js';
-import { maskVin, type Units } from './format.js';
+import { maskFailureResult, resultText, type ToolDeps } from './tool-output.js';
+import { maskVin, maskVinsInText, type Units } from './format.js';
 
 const require = createRequire(import.meta.url);
 const PKG_VERSION: string = require('../package.json').version;
@@ -45,6 +46,23 @@ function secretsFileCandidates(env: NodeJS.ProcessEnv): string[] {
   const override = env.POLESTAR_ENV_FILE?.trim();
   if (override) return [resolve(override)];
   return [resolve(homedir(), '.config', 'polestar-mcp', '.env.secrets')];
+}
+
+/**
+ * The stderr line for a failed background refresh.
+ *
+ * The request path carries the VIN, so a diagnostic about a cache refresh used
+ * to write the identifier to stderr with POLESTAR_REDACT_VIN on. Masking the
+ * path here keeps the diagnostic useful without widening the redaction promise.
+ */
+export function refreshFailureLine(url: string, message: string, redact: boolean): string {
+  let pathname = url;
+  try {
+    pathname = new URL(url).pathname;
+  } catch {
+    /* keep the raw value when it is not a URL */
+  }
+  return `background refresh failed for ${maskVinsInText(pathname, redact)}: ${maskVinsInText(message, redact)}`;
 }
 
 export interface Engine {
@@ -111,7 +129,7 @@ export function buildEngine(env: NodeJS.ProcessEnv): Engine {
     onRefreshError: ({ url, message }) => {
       // A stale entry that cannot be refreshed is worth a line on stderr even
       // without debug on: the caller was served an answer it cannot tell is old.
-      log(`background refresh failed for ${new URL(url).pathname}: ${message}`);
+      log(refreshFailureLine(url, message, config.redactVin));
     },
     disabled: config.cacheDisabled || (config.fixturesDir !== undefined && store === undefined),
   });
@@ -219,7 +237,14 @@ export interface McpSurfaceOptions {
  */
 export function createMcpServer(engine: Engine, options: McpSurfaceOptions = {}): McpSurface {
   const subscriptionsAllowed = options.subscriptions !== false;
-  const deps: ToolDeps = { client: engine.client, redactVin: engine.config.redactVin, vehicleLabels: engine.config.vehicleLabels, delegatedAccounts: engine.config.delegatedAccounts, units: engine.config.units };
+  const deps: ToolDeps = {
+    client: engine.client,
+    redactVin: engine.config.redactVin,
+    vehicleLabels: engine.config.vehicleLabels,
+    delegatedAccounts: engine.config.delegatedAccounts,
+    units: engine.config.units,
+    allowLocation: engine.config.allowLocation,
+  };
 
   // The registry is built before the server that advertises it. The instructions
   // used to be a hand-written copy of these names and limits, and had drifted:
@@ -270,7 +295,7 @@ export function createMcpServer(engine: Engine, options: McpSurfaceOptions = {})
     units: engine.config.units,
     delegated: engine.config.delegatedAccounts.length > 0,
   });
-  const prompts = promptSpecs({ history: store !== undefined });
+  const prompts = promptSpecs({ history: store !== undefined, redactVin: engine.config.redactVin });
 
   const server = new McpServer(
     { name: 'polestar-mcp', version: PKG_VERSION },
@@ -283,7 +308,16 @@ export function createMcpServer(engine: Engine, options: McpSurfaceOptions = {})
     },
   );
 
-  registerTools(server, specs);
+  registerTools(
+    server,
+    engine.config.redactVin
+      ? specs.map((spec) => ({
+          ...spec,
+          run: async (args: Record<string, unknown>, ctx) =>
+            maskFailureResult(await spec.run(args, ctx), true),
+        }))
+      : specs,
+  );
   if (engine.config.enableWrites) {
     // No v1 write endpoints exist yet; the flag is
     // the deliberate opt-in they will slot behind when Polestar ships them.
@@ -421,7 +455,18 @@ export async function readVehicleResource(
   variables: ResourceVariables,
 ): Promise<{ contents: Array<{ uri: string; text: string; mimeType: string }> }> {
   const rawVin = variables.vin;
-  const vin = decodeURIComponent(String(Array.isArray(rawVin) ? rawVin[0] ?? '' : rawVin ?? ''));
+  let vin: string;
+  try {
+    vin = decodeURIComponent(String(Array.isArray(rawVin) ? rawVin[0] ?? '' : rawVin ?? ''));
+  } catch {
+    // A malformed percent escape is the caller's invalid argument, not an
+    // internal failure: the subscription path already answers -32602 for the
+    // same input, and the read path must not turn it into -32603.
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      'The VIN segment of the resource URI has invalid percent-encoding.',
+    );
+  }
   const domain = String(Array.isArray(variables.domain) ? variables.domain[0] ?? '' : variables.domain ?? '');
   const spec = DOMAINS.find((d) => d.kind === kind && d.name === domain);
   if (!spec) {
@@ -436,7 +481,12 @@ export async function readVehicleResource(
   }
   const outcome = await readDomain(deps, spec, vin === '' ? {} : { vin }, undefined);
   const body = outcome.ok ? outcome.reading.text : resultText(outcome.result);
-  return { contents: [{ uri: uri.href, text: body, mimeType: 'text/plain' }] };
+  // A failed resource read renders the same failure text a tool would, so it
+  // gets the same redaction: an upstream message or a caller-supplied VIN can
+  // reach this surface too.
+  return {
+    contents: [{ uri: uri.href, text: outcome.ok ? body : maskVinsInText(body, deps.redactVin), mimeType: 'text/plain' }],
+  };
 }
 
 function registerResources(
@@ -533,9 +583,15 @@ export interface PromptSpec {
  * default start used to register a prompt telling the model to call two tools
  * that were never registered.
  */
-export function promptSpecs(options: { history: boolean }): PromptSpec[] {
+export function promptSpecs(options: { history: boolean; redactVin?: boolean }): PromptSpec[] {
   const first = (value: unknown): string | undefined => (Array.isArray(value) ? (value[0] as string | undefined) : typeof value === 'string' ? value : undefined);
   const message = (text: string) => ({ messages: [{ role: 'user' as const, content: { type: 'text' as const, text } }] });
+  // A caller-supplied VIN lands in the transcript through the prompt message, so
+  // it follows the same redaction rule as tool results instead of echoing it.
+  const shownVin = (value: unknown): string | undefined => {
+    const vin = first(value);
+    return vin === undefined ? undefined : maskVinsInText(vin, options.redactVin === true);
+  };
 
   const specs: PromptSpec[] = [
     {
@@ -544,7 +600,7 @@ export function promptSpecs(options: { history: boolean }): PromptSpec[] {
       description: 'A one-glance briefing: charge, range, security, and anything needing attention.',
       argsSchema: { vin: z.string().optional() },
       build(args) {
-        const vin = first(args?.vin);
+        const vin = shownVin(args?.vin);
         return message(
           `Give me a status briefing for my Polestar${vin ? ` (VIN ${vin})` : ''}. Use get_car_status, then is_car_secure, then get_needs_attention, and finish with a two-line summary plus anything that needs action.`,
         );
@@ -556,7 +612,7 @@ export function promptSpecs(options: { history: boolean }): PromptSpec[] {
       description: 'Plan the cheapest charging hours for tonight given spot prices.',
       argsSchema: { vin: z.string().optional(), prices: z.string().optional() },
       build(args) {
-        const vin = first(args?.vin);
+        const vin = shownVin(args?.vin);
         const prices = first(args?.prices);
         return message(
           `I want to charge my Polestar as cheaply as possible tonight${vin ? ` (VIN ${vin})` : ''}. Spot prices from my tariff provider: ${prices ?? 'ask me for hourly prices as {"startsAt": ISO, "price": number} pairs before planning'}. Call plan_cheapest_charge with these prices and present the result as a simple schedule with estimated cost.`,
@@ -572,7 +628,7 @@ export function promptSpecs(options: { history: boolean }): PromptSpec[] {
       description: 'Degradation and charging-session report from recorded history.',
       argsSchema: { vin: z.string().optional() },
       build(args) {
-        const vin = first(args?.vin);
+        const vin = shownVin(args?.vin);
         return message(
           `Report on my Polestar's battery health${vin ? ` (VIN ${vin})` : ''}: call get_degradation_report and get_charging_sessions, summarize the implied capacity trend, and say clearly whether there is enough history to conclude anything.`,
         );
@@ -860,9 +916,19 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<void> 
   }
 
   const surface = createMcpServer(engine);
-  await surface.server.connect(new StdioServerTransport());
+  // Answer malformed lines and batches on the wire before the SDK transport sees
+  // them: its read buffer drops invalid JSON silently and its message validator
+  // rejects arrays without a reply.
+  const filtered = createStdioInputFilter(process.stdin, process.stdout);
+  const transport = new StdioServerTransport(filtered.input, process.stdout);
+  transport.onerror = (error: Error) => engine.log(`stdio transport error: ${error.message}`);
+  await surface.server.connect(transport);
   startSampler(engine);
-  installShutdown(async () => { engine.sampler?.stop(); await surface.close(); }, engine.log);
+  installShutdown(async () => {
+    engine.sampler?.stop();
+    filtered.dispose();
+    await surface.close();
+  }, engine.log);
   // Both numbers come from the surface and the config that the lines above
   // actually used: this line used to restate "10,000 calls/day" and a hand-copied
   // tool list naming status twice, so it was wrong under POLESTAR_BUDGET.

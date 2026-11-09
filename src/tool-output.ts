@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { PolestarClient } from './client.js';
 import type { Units } from './format.js';
+import { maskVinsInText } from './format.js';
 import { describeFailure, toFailure, type MintedCode } from './failure.js';
 
 export const vinArg = {
@@ -56,6 +57,12 @@ export interface ToolDeps {
   delegatedAccounts: string[];
   /** The operator's distance unit, carried to every rendering site rather than set globally. */
   units: Units;
+  /**
+   * POLESTAR_ALLOW_LOCATION. Optional on the type so a unit test can build deps
+   * without it; false is the only value that disables position reads, matching
+   * the client's own check.
+   */
+  allowLocation?: boolean;
   nowMs?: () => number;
 }
 
@@ -200,6 +207,36 @@ export function resultText(result: ToolResult): string {
 /** One text rendering of a failure, shared by tools and by the resource surface. */
 export function describeError(err: unknown): string {
   return describeFailure(toFailure(err));
+}
+
+/**
+ * Apply POLESTAR_REDACT_VIN to a failure envelope.
+ *
+ * The VIN is masked in the rendered text and in the structured `message` and
+ * `hint`, because a failure can echo a caller argument (`INVALID_VIN`) or carry
+ * an upstream message that quotes the vehicle. `requestId` and `code` are left
+ * alone: the requestId is the handle support acts on, and a code is not data.
+ * Successes are untouched, which keeps the documented `raw: true` exception.
+ */
+export function maskFailureResult(result: ToolResult, redact: boolean): ToolResult {
+  if (!redact || result.isError !== true) return result;
+  const content = result.content.map((block) =>
+    block.type === 'text' ? { ...block, text: maskVinsInText(block.text, true) } : block,
+  );
+  const structured = result.structuredContent;
+  const maskedStructured =
+    structured === undefined
+      ? undefined
+      : {
+          ...structured,
+          ...(typeof structured.message === 'string' ? { message: maskVinsInText(structured.message, true) } : {}),
+          ...(typeof structured.hint === 'string' ? { hint: maskVinsInText(structured.hint, true) } : {}),
+        };
+  return {
+    ...result,
+    content,
+    ...(maskedStructured === undefined ? {} : { structuredContent: maskedStructured }),
+  };
 }
 
 /**

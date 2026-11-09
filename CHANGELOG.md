@@ -120,6 +120,25 @@ All notable changes to this project. The format follows
 
 ### Fixed
 
+- `POLESTAR_ALLOW_LOCATION=0` now also refuses recorded position history: `get_history`
+  for `telemetry/location` returned stored coordinates while every live read, the
+  location resource, the timeline and the digest honoured the switch.
+- The history store is created owner-only (files `0600`, per-vehicle directories `0700`),
+  an existing loose file is tightened on the next append, and a retention rewrite keeps
+  the same mode. It previously inherited the umask, and a rewrite could undo a manual
+  `chmod 600`.
+- `POLESTAR_REDACT_VIN=1` now covers a VIN echoed by an upstream error message, a
+  caller-supplied VIN in prompt text, the identifier echoed by `INVALID_VIN`, and the
+  request path in a failed background-refresh log. The mask also applies to a mistyped
+  VIN carrying a forbidden letter, which the VIN-shaped pattern alone missed.
+- stdio answers a malformed JSON line with `-32700` and a JSON-RPC batch with `-32600`
+  instead of dropping both silently. Batching is refused rather than reimplemented,
+  because MCP removed it in 2025-06-18.
+- `resources/read` with malformed percent-encoding returns `-32602` rather than
+  `-32603`.
+- `npm audit --omit=dev` reports no advisories. `hono` and `@hono/node-server` were
+  updated past the `serveStatic` path double-decode advisory, which this server never
+  imported.
 - `resources/subscribe` was accepted over stateless HTTP and could never be delivered: the
   surface that would poll is closed as its response ends, so its first tick a minute later
   fired into a closed transport. HTTP mode now advertises `subscribe: false` and does not

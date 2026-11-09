@@ -50,6 +50,10 @@ polestar-mcp/
     runtime.test.ts      cache, retry, budget, history store, sampler, fixtures seam
     server-seams.test.ts the surface, its poller's lifetime, the status tool's arithmetic
     transport-hardening.test.ts  HTTP Origin/Host guards and retry edges
+    stdio-filter.test.ts malformed lines and batch refusal before the SDK transport
+    protocol-stdio.test.ts  wire-level parse, batch and resource errors
+    security-regressions.test.ts  location history, error and prompt redaction
+    history-mode.test.ts owner-only modes on creation, appends and retention
     helpers.ts           ScriptedTransport for scripted responses
     fixtures/dump/       a small sanitized dump for tests
   scripts/

@@ -1,4 +1,4 @@
-import { mkdirSync, appendFileSync, readFileSync, existsSync, statSync, writeFileSync, renameSync } from 'node:fs';
+import { mkdirSync, appendFileSync, chmodSync, readFileSync, existsSync, statSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { batteryView, isChargingStatus } from './domain-data.js';
 
@@ -82,13 +82,30 @@ export class HistoryStore {
 
   append(vin: string, kind: string, name: string, record: HistoryRecord): void {
     const file = this.fileFor(vin, kind, name);
-    mkdirSync(path.dirname(file), { recursive: true });
+    const dir = path.dirname(file);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    this.tighten(dir, 0o700);
     const lastId = this.lastEventId.get(file) ?? this.tailEventId(file);
     if (record.metaEventId !== undefined && record.metaEventId === lastId) return;
     const line = JSON.stringify(record) + '\n';
     this.pruneIfNeeded(file, Buffer.byteLength(line));
     if (record.metaEventId !== undefined) this.lastEventId.set(file, record.metaEventId);
-    appendFileSync(file, line);
+    appendFileSync(file, line, { mode: 0o600 });
+    this.tighten(file, 0o600);
+  }
+
+  /**
+   * The store can hold position history, so its files and per-vehicle
+   * directories are owner-only. `mode` only applies when a path is created, so a
+   * file left loose by an older release or a loose umask is tightened here, and a
+   * retention rewrite below sets the same mode on the replacement.
+   */
+  private tighten(target: string, mode: number): void {
+    try {
+      if ((statSync(target).mode & 0o077) !== 0) chmodSync(target, mode);
+    } catch {
+      /* a path that vanished between creation and stat is not worth failing on */
+    }
   }
 
   /**
@@ -111,7 +128,7 @@ export class HistoryStore {
     const keep = Math.max(1, Math.ceil(lines.length / 2));
     const kept = lines.slice(lines.length - keep);
     const tmp = `${file}.tmp`;
-    writeFileSync(tmp, kept.join('\n') + '\n');
+    writeFileSync(tmp, kept.join('\n') + '\n', { mode: 0o600 });
     renameSync(tmp, file);
   }
 

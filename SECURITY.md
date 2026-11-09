@@ -11,6 +11,8 @@ threat model here is written in those terms.
   no write endpoints. `POLESTAR_ENABLE_WRITES` registers nothing.
 - Position data is opt-out at the request layer. With `POLESTAR_ALLOW_LOCATION=false`,
   `get_location` refuses and the request is never sent, so no quota is spent on it either.
+  The same switch refuses the location resource, excludes location from the timeline and
+  weekly digest, and refuses recorded position history in `get_history`.
   The refusal is enforced in `PolestarClient`, not in the display layer, so a caller cannot
   reach position by another route.
 - The upstream contract returns one Vehicle's data at a time and the server checks it. If a
@@ -24,8 +26,10 @@ threat model here is written in those terms.
 ## What redaction does and does not do
 
 `POLESTAR_REDACT_VIN=1` masks the VIN in every surface a client forwards to the
-model: tool result text and the structured envelope, resource listing names and
-descriptions, completion values, and client-facing error messages. The masked form
+model: tool result text and the structured envelope, resource listing names,
+descriptions and bodies, completion values, prompt text, client-facing error
+messages (including a VIN an upstream error quotes back, or the identifier echoed
+by `INVALID_VIN`), and stderr diagnostics that name a request path. The masked form
 keeps the first three and last three characters, which is enough to tell two
 vehicles apart without carrying the identifier into a transcript.
 
@@ -46,6 +50,11 @@ oversight:
 If you need the identifier out of a local transcript too, keep `raw` off, leave
 `POLESTAR_REDACT_VIN=1`, and treat the history directory as the one remaining local
 artifact that names vehicles.
+
+The history store itself is owner-only: each JSONL file is created `0600` and each
+per-vehicle directory `0700`, an existing loose file is tightened on the next append,
+and a retention rewrite keeps the same mode. The budget ledger is likewise `0600` and
+written atomically.
 
 ## Where credentials live
 

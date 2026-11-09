@@ -59,7 +59,7 @@ The dotenv loader here handles the idioms hand-rolled parsers get wrong: a leadi
 
 Transport choice and modes:
 
-- stdio (default) connects a `StdioServerTransport`; stdout carries the JSON-RPC protocol and nothing else, so diagnostics go to stderr and an unhandled rejection is logged rather than fatal.
+- stdio (default) runs input through a line filter and then a `StdioServerTransport`; the filter answers malformed JSON with `-32700` and a JSON-RPC batch with `-32600` on the wire, because the transport's read buffer otherwise drops both silently. Batching is refused rather than reimplemented: MCP removed it in 2025-06-18. stdout carries the JSON-RPC protocol and nothing else, so diagnostics go to stderr and an unhandled rejection is logged rather than fatal.
 - `POLESTAR_HTTP_PORT` switches to a stateless Streamable HTTP server: each request gets a fresh `McpSurface` over one shared engine (cache, budget, history included). It binds `127.0.0.1` unless told otherwise, and refuses to bind any non-loopback address without `POLESTAR_HTTP_TOKEN`, because the server reads vehicle location and an unauthenticated listener would put that on the network. Resources work in both modes: an HTTP response's `close` calls `surface.close()`, which stops the poller that surface created. Subscriptions are stdio only, and the surface says so in its `capabilities` rather than accepting one: in stateless mode the surface that would poll is closed as the response ends, so its first tick a minute later could never fire, and `registerResources` does not register the two handlers at all.
 - In fixture mode the secrets file is not read at all, so offline use never touches a live credential file.
 

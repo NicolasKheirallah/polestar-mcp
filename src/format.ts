@@ -122,6 +122,19 @@ export function maskVin(vin: string, redact: boolean): string {
   return redact ? `${vin.slice(0, 3)}…${vin.slice(-3)}` : vin;
 }
 
+/** A 17-character VIN shape, anywhere in free text. */
+const VIN_IN_TEXT = /\b[A-HJ-NPR-Z0-9]{17}\b/g;
+
+/**
+ * Mask every VIN-shaped run in free text, for surfaces that render text this
+ * server did not compose: an upstream error message, a caller-supplied argument
+ * echoed back, a request path in a diagnostic. Masking only the VIN the server
+ * knows about leaves those channels carrying the identifier verbatim.
+ */
+export function maskVinsInText(text: string, redact: boolean): string {
+  return redact ? text.replace(VIN_IN_TEXT, (vin) => `${vin.slice(0, 3)}…${vin.slice(-3)}`) : text;
+}
+
 export function vinLabel(vin: string, redact: boolean, labels?: Record<string, string>): string {
   const label = labels !== undefined ? labelFor(vin, labels) : undefined;
   if (label !== undefined) return label;

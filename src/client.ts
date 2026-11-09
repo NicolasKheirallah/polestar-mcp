@@ -126,9 +126,14 @@ export class PolestarClient {
           this.opts.redactVin === true
             ? ' POLESTAR_REDACT_VIN hides VINs in tool and resource text; the resource URI is the documented exception, so copy the VIN from a resource URI when subscribing.'
             : '';
+        // A mistyped VIN is still an identifier: echoing it in the refusal would
+        // put the caller's own near-miss into the transcript with redaction on.
+        const shown = this.opts.redactVin === true && normalized.length >= 8
+          ? `${normalized.slice(0, 3)}…${normalized.slice(-3)}`
+          : vin;
         throw new PolestarApiError(
           'INVALID_VIN',
-          `"${vin}" is not a plausible VIN (17 characters, no I/O/Q). Call list_vehicles for valid VINs.${uriException}`,
+          `"${shown}" is not a plausible VIN (17 characters, no I/O/Q). Call list_vehicles for valid VINs.${uriException}`,
           400,
         );
       }
