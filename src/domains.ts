@@ -419,7 +419,17 @@ export function parseDomainPath(pathname: string): DomainRef | undefined {
   if (rawVin === undefined || rawKind === undefined || rawName === undefined) return undefined;
   const spec = findDomain(rawKind, rawName);
   if (spec === undefined) return undefined;
-  return { vin: decodeURIComponent(rawVin), kind: spec.kind, name: spec.name };
+  let vin: string;
+  try {
+    vin = decodeURIComponent(rawVin);
+  } catch {
+    // A malformed percent escape is a client mistake, not a server crash. This
+    // used to throw URIError out of the protocol handler and answer
+    // INTERNAL_ERROR; returning undefined lets the subscription path answer
+    // -32602 invalid params instead, which is what the client can act on.
+    return undefined;
+  }
+  return { vin, kind: spec.kind, name: spec.name };
 }
 /** Deduplicated OAuth scopes for every registered domain. */
 export function collectScopes(domains: readonly DomainSpec[] = DOMAINS): string[] {

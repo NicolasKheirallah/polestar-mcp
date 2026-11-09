@@ -33,6 +33,52 @@ All notable changes to this project. The format follows
   `.dockerignore`.
 - Coverage floors in `npm run coverage`: lines 90, branches 80, functions 85.
 
+- `docs/privacy.md` and `docs/reviewer-pack.md`, linked from the README: the privacy policy
+  describes local-only processing, the credential model and the owner's controls, and the
+  reviewer pack carries the sample-data statement, the three example prompts, the
+  directory-policy checklist and the distribution status.
+- Claude Desktop bundle metadata in `mcpb/manifest.json` and the owner build checklist in
+  `docs/bundle.md`. The manifest declares the three credentials as `user_config` fields (the
+  secret sensitive), maps them to `POLESTAR_*`, and points `privacy_policies` at the privacy
+  policy. Building the `.mcpb` is blocked on the `mcpb` CLI and a desktop host.
+- `scripts/smoke-bin.ts` now closes stdin, asserts every exit code against the real child
+  status, checks the executable mode instead of setting it, and proves with a positive
+  control that it can see a nonzero exit. The check drops from about 20 seconds to about 0.5.
+- `.env.example` lists every `POLESTAR_*` variable the server reads, and the envvars gate now
+  checks it as a third document. CONTRIBUTING and the development notes give the Node 20.11
+  floor, the new scripts and the new CI jobs; `package.json` ships `docs/` and `mcpb/` so the
+  packaged README links resolve.
+
+- `list_vehicle_domains`, which reports for one vehicle whether each of the 15 domains is
+  reported, absent or failed, with the data age when reported; it costs up to one cached read
+  per domain on a cold cache.
+- `get_charging_setup`, one cached call over the seven charging settings, each with its data
+  age and with unreported settings named rather than omitted.
+- `get_departure_readiness`, which answers whether the car can be charged to its target and
+  preconditioned by a departure time, names the latest charge deadline, and refuses to guess
+  when only a one-shot timer without a date is configured.
+- `list_vehicle_domains`, which reports which of the 15 domains this vehicle reports, as
+  reported, absent, refused by `POLESTAR_ALLOW_LOCATION` or failed, with data ages. It costs
+  up to one cached read per domain on a cold cache, and its structured data names the counts.
+- Five history tools: `get_charging_cost` (session energy and cost against caller-supplied
+  prices, with the capacity source, efficiency and every missing price stated),
+  `get_warning_changes` (warnings appearing or clearing, with unobserved periods named),
+  `get_service_forecast` (which of the car's two service limits arrives first, plus an
+  odometer rate), `get_settings_history` (charging setting changes dated by the value clock),
+  and the derived views below.
+- `get_trips` (odometer-derived trips with gaps and resets named), `get_timeline` (a
+  cross-domain timeline of what changed over a window, location only when allowed) and
+  `get_weekly_digest` (seven-day digest that says the week was not observed rather than quiet
+  when the store is empty). All three read only the local store.
+- `POLESTAR_BUDGET_LEDGER`, an absolute path to a JSON file that keeps the daily live-call
+  count across restarts and processes; unset keeps the meter in memory.
+
+- `tools/list` fell from 44,837 to about 29,950 bytes at the 23-tool surface after one compact
+  output schema replaced the 26 repeated copies and the endpoint/scope suffix left the domain
+  descriptions (the mapping is still printed by `list_domains`).
+- `POLESTAR_HTTP_ALLOWED_ORIGINS` admits browser origins in HTTP mode; unset keeps the
+  same-host-origin rule, and a forged `Host` is refused either way.
+
 ### Changed
 
 - Which vehicle a call is about, and how its domains are read, now come from one module

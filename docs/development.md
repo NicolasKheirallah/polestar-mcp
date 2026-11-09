@@ -14,7 +14,7 @@ polestar-mcp/
     charge-model.ts      power, capacity and energy maths shared by estimate and planner
     failure.ts           one declared shape for failures crossing to the tools
     subscriptions.ts     metaEventId polling, budget stand-down, injected clock
-    bind.ts              the loopback-and-token decision for HTTP mode
+    bind.ts              the loopback, token and Origin decision for HTTP mode
     config.ts            configuration registry, validation, dotenv loader
     client.ts            PolestarClient: VINs, envelope, identity, errors
     auth.ts              TokenProvider: client-credentials lifecycle
@@ -23,7 +23,7 @@ polestar-mcp/
     advisor-tools.ts     plan_cheapest_charge (prices in, schedule out)
     system-tools.ts      polestar_status (budget, cache, token)
     history-tools.ts     history/degradation/sessions (opt-in)
-    tool-output.ts       the result envelope: vin/raw args, text, errorResult
+    tool-output.ts       the result envelope: vin/raw args, text, structured data, errors
     vehicle-read.ts      which Vehicle, which Domains: resolve, reads, DATA_NOT_AVAILABLE
     format.ts            humanizer: enum labels, units, ages, summaries
     planner.ts           cheapest-hours arithmetic for the advisor
@@ -34,24 +34,42 @@ polestar-mcp/
     retrying-transport.ts 429/502/503, Retry-After, backoff
     transport.ts         the seam: HttpTransport, FixtureTransport
   test/
+    aggregates.test.ts   the aggregate answers and their shared rules
     auth.test.ts         token lifecycle
     client.test.ts       envelope, headers, VINs, identity, errors
-    runtime.test.ts      cache, retry, budget, history store, sampler, fixtures seam
     contract.test.ts     the fixture dump against every Domain's pinned keys
+    docs-gates.test.ts   positive controls for the documentation and version gates
+    engine-chain.test.ts metering and retry composition through buildEngine
+    envelope.test.ts     the structured result envelope
+    envelope-slice-b.test.ts  structured data and failure presentation
+    history.test.ts      history store, degradation span, session span
     planner.test.ts      charge-window math including wrap-around
     charge-model.test.ts power, capacity and charge-time arithmetic
     config-registry.test.ts  variables, validation, unknown detection
-    server-seams.test.ts the surface, its poller's lifetime, the status tool's arithmetic
     posture.test.ts      what the server refuses to do: writes, the consumer app API
+    runtime.test.ts      cache, retry, budget, history store, sampler, fixtures seam
+    server-seams.test.ts the surface, its poller's lifetime, the status tool's arithmetic
+    transport-hardening.test.ts  HTTP Origin/Host guards and retry edges
     helpers.ts           ScriptedTransport for scripted responses
     fixtures/dump/       a small sanitized dump for tests
   scripts/
-    smoke.ts             stdio end-to-end: registry, tools, resources
-    smoke-http.ts        Streamable HTTP end-to-end over POSTs
-    demo-dump.ts         stdio checks against the real captured dump
+    capture.ts           refresh a capture and regenerate sanitized fixtures
+    check-secrets.mjs    secret-hygiene gate
+    check-tool-refs.mjs  every tool name in agent-facing prose is registered
+    check-version.mjs    one version across package, registry file, README, changelog, release note
+    demo.mjs             package-safe offline demo, plain Node, no tsx
+    demo-dump.ts         contributor offline demo through tsx
+    list-tools.ts        print the tool registry from the same specs the server registers
+    server-for-inspector.ts  launch under the MCP inspector
+    smoke-bin.ts         the published bin path: version, help, handshake, real exit codes
+    smoke-http.ts        Streamable HTTP end to end
+    smoke.ts             stdio end to end
     stdio-client.ts      minimal MCP stdio test client
-    check-secrets.mjs    the secret-hygiene check
-  docs/                  this documentation set
+    validate-server-json.mjs  the 2025-12-11 registry metadata shape
+    verify-fixtures.mjs  every Domain has a valid fixture envelope
+  mcpb/
+    manifest.json        Claude Desktop bundle manifest; build checklist in docs/bundle.md
+  docs/                  this documentation set (privacy, reviewer pack and bundle included)
 ```
 
 ## Commands
@@ -113,7 +131,7 @@ Credentials live outside the project tree by design (the search order is in [get
 - Every detector must first fire on a synthetic positive control, or the scan exits with `CONTROL_FAIL` and a clean result means nothing.
 - The one allow-listed VIN shape is the synthetic test marker `YSMTEST...` (regex `^YSMTEST\d{2}PL\d+$`), which cannot be a real Polestar identifier. Every other VIN-shaped match is treated as genuine.
 
-Treat captured dumps like passwords. The dump in the parent directory contains long-lived refresh tokens and location history; do not commit it, email it, or paste its contents into issues.
+Treat captured dumps like passwords. A capture written by `npm run capture` (outside the project tree) contains long-lived refresh tokens and location history; do not commit it, email it, or paste its contents into issues.
 
 ## Adding a tool
 

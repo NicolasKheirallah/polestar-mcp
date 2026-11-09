@@ -152,7 +152,9 @@ export function planCheapestCharge(input: ChargePlanInput): ChargePlan {
   // start equals its normalized end (0 to 24), is a full-day window rather
   // than an empty one.
   const fullDay = windowHours === 0;
-  if (startHour !== input.windowStartHour || endHour !== input.windowEndHour) {
+  if (fullDay && (startHour !== input.windowStartHour || endHour !== input.windowEndHour)) {
+    assumptions.push(`Window hours ${input.windowStartHour} to ${input.windowEndHour} are read as a whole-day window`);
+  } else if (startHour !== input.windowStartHour || endHour !== input.windowEndHour) {
     assumptions.push(
       `Window hours ${input.windowStartHour} to ${input.windowEndHour} are read as ${startHour}:00 to ${endHour}:00`,
     );

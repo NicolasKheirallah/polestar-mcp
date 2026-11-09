@@ -82,8 +82,19 @@ export async function resolveVinOrAsk(
 
     const answer = acceptedContent<{ vin?: string }>(ctx?.mcpReq?.inputResponses, requestKey);
     if (answer?.vin !== undefined) {
-      // Client input is untrusted: resolveVin still validates it.
-      return { vin: await deps.client.resolveVin(answer.vin) };
+      // A retried answer carries whatever the client was offered. With redaction
+      // on that is a masked identifier, so map it back to the real VIN first.
+      // Client input is untrusted either way: resolveVin still validates it.
+      let resolved = answer.vin;
+      if (deps.redactVin) {
+        try {
+          const visible = await deps.client.vehicles();
+          resolved = visible.find((vin) => maskVin(vin, true) === answer.vin) ?? answer.vin;
+        } catch {
+          // Fall through to resolveVin with the answer as given.
+        }
+      }
+      return { vin: await deps.client.resolveVin(resolved) };
     }
 
     const askable = ctx?.mcpReq?.elicitInput;

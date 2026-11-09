@@ -30,8 +30,10 @@ When you write about a module, use **module**, **interface**, **depth**, **seam*
 npm ci
 npm run build
 npm test
+npm run coverage     # fails below the documented lines/branches/functions floors
 npm run smoke        # full MCP surface over stdio, against the synthetic dump
 npm run smoke-http   # the same surface over Streamable HTTP
+npm run demo         # offline demo from the shipped dump, no tsx, prints DUMP_OK
 ```
 
 You do not need Polestar credentials for any of that. Fixture mode replays
@@ -48,18 +50,25 @@ explicitly instead of guessing.
 | Command | What it proves |
 | --- | --- |
 | `npm run typecheck` | `src`, `test` and `scripts` all compile under `strict` plus `exactOptionalPropertyTypes`. `tsx` never typechecks, so without this a red build can hide behind green tests. |
-| `npm run build` | The published `build/server.js` exists and is executable. |
-| `npm test` | Unit behaviour: token lifecycle, Envelope and identity checks, error normalization, budget metering, retry and cache policy, the humanizer, the planner, the tool registry, and the shared vehicle-read seam (every tool asks the client which vehicle to use, every tool states a missing Domain in the same words, and the resource read is the tool read). |
-| `npm run coverage` | How much of the source the unit suite reaches. |
-| `npm run smoke` / `npm run smoke-http` | The real MCP surface end to end: handshake, every tool registered, `outputSchema` on all of them, resources, prompts, elicitation. |
-| `npm run smoke-bin` | The published launch path: `--version`, `--help` and a handshake against `build/server.js` through its bin symlink, the way a global install and `npx` run it. |
+| `npm run build` | The published `build/server.js` exists and carries an executable mode; `smoke-bin` checks that mode instead of setting it. |
+| `npm test` | Unit behaviour: token lifecycle, Envelope and identity checks, error normalization, budget metering, retry and cache policy, the humanizer, the planner and charge model, the structured result envelope, the history store and spans, the tool registry, and the shared vehicle-read seam. |
+| `npm run coverage` | The same suite with floors: lines 90, branches 80, functions 85. The command exits nonzero below a floor, so CI can actually fail on it. |
+| `npm run smoke` / `npm run smoke-http` | The real MCP surface end to end: handshake, every tool registered, `outputSchema` on all of them, resources, prompts, elicitation, and the strict-argument refusal. |
+| `npm run smoke-bin` | The published launch path: `--version` prints the `package.json` version, `--help` carries usage, and a handshake completes through the bin symlink. Every exit code is asserted, a positive control proves the harness can see a nonzero one, and it finishes in about a second. |
+| `npm run demo` / `npm run demo-dump` | The offline demo against the shipped `test/fixtures/dump`, through plain Node and through tsx. Both print `DUMP_OK` and never print a VIN. |
 | `npm run verify-fixtures` | Every Domain in the registry has a fixture and each fixture is a valid Envelope. |
 | `npm run check-secrets` | No credential file in the tree, and no JWT, opaque secret, VIN-shaped identifier, personal email, phone number or precise coordinate in any scanned file. |
 | `npm run check-tool-refs` | Prose an agent or operator acts on never names a tool the registry does not define. |
+| `npm run check-version` | `package.json`, `server.json` (top level and package entry), the README badge, the newest released CHANGELOG heading and `docs/releases/vX.Y.Z.md` name the same version. |
+| `npm run check-server-json` | `server.json` has the 2025-12-11 registry shape: `packages[].identifier`, `transport`, `isRequired`/`isSecret`, and a `name` matching `package.json.mcpName`. |
 | `node docs/check-docs.mjs tools` | Documented tool counts match the registry, which is derived from the code rather than restated. |
-| `node docs/check-docs.mjs envvars` | Every `POLESTAR_*` variable the code reads is documented, and vice versa. |
-| `node docs/check-docs.mjs links` | No link points at a file or heading that does not exist. |
+| `node docs/check-docs.mjs envvars` | Every `POLESTAR_*` variable the code reads appears in getting started, the README table and `.env.example`. |
+| `node docs/check-docs.mjs links` | No link points at a file or heading that does not exist, across every tracked markdown document (CONTRIBUTING, SECURITY, CHANGELOG, `docs/releases/**` and the rest). |
 | `node docs/check-docs.mjs hygiene` | Writing hygiene across the whole tree: banned dashes and connector hyphens, marketing vocabulary, decorative comment banners. Each detector proves itself on a positive control first, and the walk fails if it matches too few files, so a green run cannot mean the scope quietly narrowed. |
+
+CI runs three further jobs besides the verify job above: a Node floor matrix at 20.11, 22 and 24;
+a pack-and-install job that installs the real tarball and runs the commands from the packaged
+README; and a docker build that checks the image runs as a non-root user with a healthcheck.
 
 Run them before you open a pull request. A green `npm test` alone does not mean the change is
 done; the point of the table above is that each claim has something that can fail.

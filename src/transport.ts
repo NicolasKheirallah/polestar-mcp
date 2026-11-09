@@ -32,9 +32,21 @@ export class TransportError extends Error {
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
+/**
+ * Upper bound on one upstream response body, 4 MiB. A Domain payload is a few
+ * kilobytes and the vehicle list is smaller, so this only fires on a misrouted
+ * request, a proxy error page with an enormous body, or a hostile endpoint.
+ * `fetch().text()` would buffer whatever arrives; the cap makes the failure
+ * bounded and typed instead of a memory spike.
+ */
+export const DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+
 /** Real HTTP adapter: global fetch with a hard deadline on every request. */
 export class HttpTransport implements Transport {
-  constructor(private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS) {}
+  constructor(
+    private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS,
+    private readonly maxResponseBytes: number = DEFAULT_MAX_RESPONSE_BYTES,
+  ) {}
 
   async fetch(url: string, request: TransportRequest = {}): Promise<TransportResponse> {
     // Without a deadline one hung Polestar connection blocks forever, and since
@@ -65,7 +77,64 @@ export class HttpTransport implements Transport {
       const value = res.headers.get(name);
       if (value !== null) headers[name] = value;
     }
-    return { status: res.status, body: await res.text(), headers };
+    return { status: res.status, body: await this.readBody(url, res), headers };
+  }
+
+  /**
+   * Read the body up to the cap rather than calling `res.text()`.
+   *
+   * A declared Content-Length over the cap is refused without touching the
+   * stream; otherwise the read stops as soon as the limit is crossed and the
+   * stream is cancelled so the socket is released. The thrown value is a
+   * TransportError, the typed transport failure the rest of the code already
+   * renders; causeKind stays 'network' because the retry policy and the failure
+   * mapping live in other modules and a new kind would be a cross-owner change.
+   * The practical cost is one bounded retry on a GET before the failure surfaces.
+   */
+  private async readBody(url: string, res: Response): Promise<string> {
+    const declared = Number(res.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > this.maxResponseBytes) {
+      await res.body?.cancel().catch(() => undefined);
+      throw this.tooLarge(url, `${declared} bytes declared`);
+    }
+    if (res.body === null) return '';
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let received = 0;
+    let text = '';
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.byteLength;
+        if (received > this.maxResponseBytes) {
+          await reader.cancel().catch(() => undefined);
+          throw this.tooLarge(url, `${received} bytes received`);
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+    } catch (err) {
+      if (err instanceof TransportError) throw err;
+      const name = err instanceof Error ? err.name : '';
+      const timedOut = name === 'TimeoutError' || name === 'AbortError';
+      throw new TransportError(
+        timedOut
+          ? `Request to ${url} did not complete within ${this.timeoutMs}ms.`
+          : `Network request to ${url} failed while reading the response body.`,
+        timedOut ? 'timeout' : 'network',
+      );
+    } finally {
+      reader.releaseLock();
+    }
+    return text + decoder.decode();
+  }
+
+  private tooLarge(url: string, detail: string): TransportError {
+    return new TransportError(
+      `Response from ${url} exceeded the ${this.maxResponseBytes} byte cap (${detail}); refusing to buffer it.`,
+      'network',
+    );
   }
 }
 

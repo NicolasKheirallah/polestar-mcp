@@ -13,6 +13,8 @@ import {
   createHttpHandler,
   createMcpServer,
   listVehicleResources,
+  MAX_HTTP_REQUEST_BYTES,
+  payloadTooLargeBody,
   readVehicleResource,
   type Engine,
   type McpSurface,
@@ -170,6 +172,32 @@ function post(port: number, headers: Record<string, string>, body: string): Prom
   });
 }
 
+/** POST a body in chunks with no Content-Length, so Node uses chunked framing. */
+function postChunked(port: number, chunks: readonly string[]): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    // The transport checks Accept before it reads the body, so a chunked test
+    // must satisfy that check to reach the size cap at all.
+    const req = httpRequest(
+      {
+        host: '127.0.0.1',
+        port,
+        path: '/',
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      },
+      (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => { data += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }));
+      },
+    );
+    req.on('error', reject);
+    for (const chunk of chunks) req.write(chunk);
+    req.end();
+  });
+}
+
 const INITIALIZE = JSON.stringify({
   jsonrpc: '2.0',
   id: 1,
@@ -180,10 +208,11 @@ const INITIALIZE = JSON.stringify({
 async function withHttp(
   engine: Engine,
   run: (port: number) => Promise<void>,
+  options: { maxRequestBytes?: number } = {},
 ): Promise<void> {
   const bind = decideBind({ host: '127.0.0.1', token: engine.config.httpToken });
   assert.equal(bind.ok, true);
-  const server = createHttpServer(createHttpHandler(engine, bind as BindSuccess));
+  const server = createHttpServer(createHttpHandler(engine, bind as BindSuccess, options));
   await new Promise<void>((ready) => server.listen(0, '127.0.0.1', ready));
   const port = (server.address() as AddressInfo).port;
   try {
@@ -259,6 +288,51 @@ test('the advertised capabilities promise only what a sender exists for', () => 
   assert.equal(statelessCaps.resources?.subscribe, false, 'a per-request surface cannot');
   assert.equal('logging' in stdioCaps, false, 'nothing in src/ sends a logging notification');
   assert.equal('logging' in statelessCaps, false);
+});
+
+test('an oversized HTTP request body is refused with 413 before it is read', async () => {
+  const { engine } = surfaceFor({});
+  const limit = 1024;
+  await withHttp(
+    engine,
+    async (port) => {
+      // The declared length alone is enough: the body below is never sent, so a
+      // 413 proves the cap runs before the transport reads the stream.
+      const declared = await post(
+        port,
+        { 'content-type': 'application/json', 'content-length': String(limit * 2) },
+        '{}',
+      );
+      assert.equal(declared.status, 413, JSON.stringify(declared));
+      const error = JSON.parse(declared.body) as { jsonrpc: string; error: { code: number; message: string } };
+      assert.equal(error.jsonrpc, '2.0');
+      assert.equal(error.error.code, -32000);
+      assert.match(error.error.message, /Payload Too Large/);
+      assert.match(error.error.message, new RegExp(String(limit)));
+
+      // A chunked body declares no length; the transport cap stops that read at
+      // the same bound and answers the same way.
+      const chunked = await postChunked(port, ['x'.repeat(limit), 'y'.repeat(limit)]);
+      assert.equal(chunked.status, 413, JSON.stringify(chunked));
+      assert.match(chunked.body, /Payload Too Large|exceed/i);
+
+      // A normal body still completes the handshake.
+      const ok = await post(
+        port,
+        { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        INITIALIZE,
+      );
+      assert.equal(ok.status, 200, ok.body.slice(0, 200));
+    },
+    { maxRequestBytes: limit },
+  );
+});
+
+test('the production request body cap is the documented 4 MiB', () => {
+  assert.equal(MAX_HTTP_REQUEST_BYTES, 4 * 1024 * 1024);
+  const parsed = JSON.parse(payloadTooLargeBody()) as { error: { code: number; message: string } };
+  assert.equal(parsed.error.code, -32000);
+  assert.match(parsed.error.message, /4194304 bytes/);
 });
 
 test('config refuses a fixtures directory that does not exist, naming the variable and the fix', () => {
@@ -412,6 +486,10 @@ test('an unparseable or non-VIN subscription URI is a JSON-RPC invalid-params er
     'polestar://vehicle/not-a-vin/telemetry/battery',
     'polestar://vehicle/YSMTEST22PL000001/telemetry/not-a-domain',
     'polestar://vehicle/YSMTEST22PL000001/solar/battery',
+    // A malformed percent escape used to throw URIError out of the handler and
+    // answer INTERNAL_ERROR; parseDomainPath now returns undefined and the
+    // subscription path answers invalid params instead.
+    'polestar://vehicle/%E0%A4%A/telemetry/battery',
   ];
   for (const uri of rejected) {
     await assert.rejects(

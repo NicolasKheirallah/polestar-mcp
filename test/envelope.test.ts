@@ -158,21 +158,44 @@ test('tools/list fits its budget and keeps one compact output schema on every to
     const listed = await standard.client.listTools();
     const extended = await withHistory.client.listTools();
 
-    assert.equal(listed.tools.length, 23, 'the default surface is 23 tools');
-    assert.equal(extended.tools.length, 26, 'history adds three tools');
+    // Wave 2 grew the default surface from 23 to 26 tools (list_vehicle_domains,
+    // get_charging_setup, get_departure_readiness) and the history surface from
+    // 26 to 36 (seven settings and analytics tools plus the trip, timeline and
+    // digest tools). The ceilings were re-measured rather than carried over:
+    // 34,723 bytes default and 50,420 with history. The default keeps 36,000 so
+    // a small description change does not trip the gate, and history keeps
+    // 55,000 for the same reason now that its ten tools are all present.
+    assert.equal(listed.tools.length, 26, 'the default surface is 26 tools after the wave 2 additions');
+    assert.ok(
+      extended.tools.length >= 36,
+      `history adds tools on top of the default surface, saw ${extended.tools.length}`,
+    );
 
     assert.ok(
-      listed.bytes < 32_000,
-      `default tools/list result is ${listed.tools.length} tools at ${listed.bytes} bytes, M5/S7 budget is 32,000`,
+      listed.bytes < 36_000,
+      `default tools/list result is ${listed.tools.length} tools at ${listed.bytes} bytes, budget is 36,000`,
     );
     assert.ok(
-      extended.bytes < 46_000,
-      `history tools/list result is ${extended.tools.length} tools at ${extended.bytes} bytes, budget is 46,000`,
+      extended.bytes < 55_000,
+      `history tools/list result is ${extended.tools.length} tools at ${extended.bytes} bytes, budget is 55,000`,
     );
 
     for (const tool of [...listed.tools, ...extended.tools]) {
       assert.ok(tool.outputSchema !== undefined, `${tool.name} declares an output schema`);
     }
+    // Per-tool description economy: the routing text for one tool should not cost
+    // a session more than the largest tool does today (get_battery, 532 bytes).
+    // A tool that grows past this is a decision, not a refactor.
+    for (const tool of listed.tools) {
+      const length = tool.description?.length ?? 0;
+      assert.ok(length < 700, `${tool.name} description is ${length} bytes, per-tool ceiling is 700`);
+    }
+    const descriptionBytes = listed.tools.reduce((sum, tool) => sum + (tool.description?.length ?? 0), 0);
+    assert.ok(
+      descriptionBytes < 6_500,
+      `default tool descriptions total ${descriptionBytes} bytes, ceiling is 6,500 (5,752 at 26 tools)`,
+    );
+
     // One shared schema, converted once per tool by the SDK. The point is that it
     // is the same small shape: 401 bytes with the field descriptions dropped,
     // against 1,009 when every field carried one.

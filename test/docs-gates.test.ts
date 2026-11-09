@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -116,15 +116,18 @@ test('envvars gate reads full names with digits from every src file and needs th
   write(dir, 'src/extra.ts', 'export const other = process.env.POLESTAR_EXTRA_FILE_ONLY;\n');
   write(dir, 'README.md', `# probe\n\n${known}\n`);
   write(dir, 'docs/getting-started.md', `# start\n\n${known}\n`);
+  write(dir, '.env.example', `# probe\n${known}=\n`);
   try {
     const missing = runScript(gate, ['envvars'], dir);
     assert.equal(missing.code, 1);
     assert.match(missing.stderr, /ENVVARS_CHECK_FAILED/);
     assert.match(missing.stderr, new RegExp(digit), 'the failure names the full variable, not POLESTAR_TIMEOUT_');
     assert.match(missing.stderr, /POLESTAR_EXTRA_FILE_ONLY/);
+    assert.match(missing.stderr, /\.env\.example/, 'every document is named, including the template');
 
     write(dir, 'README.md', `# probe\n\n${known}\n${digit}\nPOLESTAR_EXTRA_FILE_ONLY\n`);
     write(dir, 'docs/getting-started.md', `# start\n\n${known}\n${digit}\nPOLESTAR_EXTRA_FILE_ONLY\n`);
+    write(dir, '.env.example', `# probe\n${known}=\n${digit}=\nPOLESTAR_EXTRA_FILE_ONLY=\n`);
     const clean = runScript(gate, ['envvars'], dir);
     assert.equal(clean.code, 0, clean.stderr);
     assert.match(clean.stdout, /DOCS_ENVVARS_OK/);
@@ -226,6 +229,59 @@ test('server.json gate rejects the legacy name key and the legacy required key',
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the package ships the docs, the demo and the bundle metadata, and the README links them', () => {
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { files: string[] };
+  for (const entry of ['docs', 'mcpb', 'scripts/demo.mjs', 'test/fixtures/dump']) {
+    assert.ok(pkg.files.includes(entry), `package.json files is missing ${entry}`);
+  }
+  for (const rel of ['docs/privacy.md', 'docs/reviewer-pack.md', 'docs/bundle.md', 'mcpb/manifest.json']) {
+    assert.ok(existsSync(path.join(ROOT, rel)), `missing ${rel}`);
+  }
+  const readme = readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+  for (const link of ['docs/privacy.md', 'docs/reviewer-pack.md', 'docs/bundle.md']) {
+    assert.ok(readme.includes(link), `README does not link ${link}`);
+  }
+});
+
+test('the bundle manifest names the package version and maps the sensitive credential', () => {
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { version: string };
+  const manifest = JSON.parse(readFileSync(path.join(ROOT, 'mcpb/manifest.json'), 'utf8')) as {
+    manifest_version: string;
+    version: string;
+    server: { type: string; entry_point: string; mcp_config?: { env?: Record<string, string> } };
+    user_config: Record<string, { sensitive?: boolean; required?: boolean }>;
+    privacy_policies: string[];
+  };
+  assert.equal(manifest.manifest_version, '0.3');
+  assert.equal(manifest.version, pkg.version);
+  assert.equal(manifest.server.type, 'node');
+  assert.ok(manifest.server.entry_point.endsWith('build/server.js'));
+  assert.equal(manifest.server.mcp_config?.env?.POLESTAR_CLIENT_SECRET, '${user_config.client_secret}');
+  assert.equal(manifest.user_config.client_secret?.sensitive, true);
+  assert.equal(manifest.user_config.client_secret?.required, true);
+  assert.ok(Array.isArray(manifest.privacy_policies) && manifest.privacy_policies.length > 0);
+  for (const url of manifest.privacy_policies) assert.match(url, /^https:\/\//);
+});
+
+test('every variable the server reads is present in the env template', async () => {
+  const { KNOWN_ENV_VARIABLES } = await import('../src/config.js');
+  const template = readFileSync(path.join(ROOT, '.env.example'), 'utf8');
+  const missing = KNOWN_ENV_VARIABLES.filter((name) => !template.includes(name));
+  assert.deepEqual(missing, [], `missing from .env.example: ${missing.join(', ')}`);
+});
+
+test('the bin smoke reports its own result quickly', { skip: !existsSync(path.join(ROOT, 'build/server.js')) ? 'build/server.js is absent; run npm run build' : false }, () => {
+  const started = Date.now();
+  const result = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/smoke-bin.ts'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  });
+  const elapsedMs = Date.now() - started;
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /BIN_SMOKE_OK/);
+  assert.ok(elapsedMs < 10_000, `smoke-bin took ${elapsedMs}ms; it must close stdin and assert real exit codes`);
 });
 
 test('the checkout passes its own version and registry metadata gates', () => {

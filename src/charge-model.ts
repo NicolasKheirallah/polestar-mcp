@@ -203,7 +203,7 @@ export function chargeModel(input: ChargeModelInput): ChargeModel {
   let gridEnergyKwh: number | undefined;
   if (capacityKwh !== undefined && input.socPct !== undefined && input.targetPct !== undefined) {
     energyNeededKwh = Math.max(0, (capacityKwh * (input.targetPct - input.socPct)) / 100);
-    if (Number.isFinite(efficiency) && efficiency > 0) {
+    if (Number.isFinite(efficiency) && efficiency > 0 && efficiency <= 1) {
       gridEnergyKwh = energyNeededKwh / efficiency;
       assumptions.push(`grid energy assumes ${(efficiency * 100).toFixed(0)}% AC efficiency (battery energy / efficiency)`);
     }

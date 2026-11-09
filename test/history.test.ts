@@ -311,3 +311,29 @@ test('the store prunes the oldest records when a file exceeds its bound', () => 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('linearTrend fits a slope with an interval and refuses a flat series as a trend', async () => {
+  const { linearTrend } = await import('../src/history.js');
+  const falling = Array.from({ length: 12 }, (_, i) => ({ x: i * 30, y: 340 - 2 * i * 30 }));
+  const trend = linearTrend(falling)!;
+  assert.ok(Math.abs(trend.slopePerMonth + 60.88) < 0.05, `monthly slope ${trend.slopePerMonth}`);
+  assert.equal(trend.excludesZero, true);
+  const flat = linearTrend(Array.from({ length: 12 }, (_, i) => ({ x: i * 30, y: 340 })))!;
+  assert.equal(flat.slopePerMonth, 0);
+  assert.equal(flat.excludesZero, false, 'a flat series must not be called a trend');
+  assert.equal(linearTrend([{ x: 0, y: 1 }, { x: 1, y: 2 }]), undefined, 'two points have no residual degrees of freedom');
+});
+
+test('odometerRate treats a backward odometer as a reset and ignores zero elapsed time', async () => {
+  const { odometerRate } = await import('../src/history.js');
+  const rate = odometerRate([
+    { observedAt: 0, metaEventId: undefined, data: { odometerMeters: 1_000_000 } },
+    { observedAt: 7 * 86_400_000, metaEventId: undefined, data: { odometerMeters: 1_350_000 } },
+    { observedAt: 14 * 86_400_000, metaEventId: undefined, data: { odometerMeters: 1_700_000 } },
+    { observedAt: 15 * 86_400_000, metaEventId: undefined, data: { odometerMeters: 500 } },
+    { observedAt: 15 * 86_400_000, metaEventId: undefined, data: { odometerMeters: 2_700_000 } },
+  ]);
+  assert.equal(rate.resets, 1);
+  assert.equal(rate.samples, 5);
+  assert.ok(rate.kmPerDay !== undefined && Math.abs(rate.kmPerDay - 50) < 0.01, `rate ${rate.kmPerDay}`);
+});

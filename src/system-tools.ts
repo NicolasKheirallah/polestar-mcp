@@ -1,7 +1,7 @@
 import type { CacheStats } from './caching-transport.js';
 import type { BudgetMeter, MinuteWindowMeter } from './budget.js';
 import { EXPIRY_SKEW_MS } from './auth.js';
-import { text, type ToolDeps } from './tool-output.js';
+import { withData, type ToolDeps } from './tool-output.js';
 import type { ToolSpec } from './tools.js';
 
 export interface SystemDeps extends ToolDeps {
@@ -61,12 +61,41 @@ export function systemToolSpecs(deps: SystemDeps): ToolSpec[] {
         // The provider refetches before the advertised expiry, so report the life
         // it will actually use; the advertised number overstates it by the skew.
         const trustedUntil = expiresAt !== undefined ? expiresAt - EXPIRY_SKEW_MS : undefined;
+        const trustedMinutes =
+          trustedUntil === undefined ? undefined : Math.max(0, Math.round((trustedUntil - nowMs) / 60_000));
         lines.push(
-          trustedUntil !== undefined
-            ? `Token: trusted ~${Math.max(0, Math.round((trustedUntil - nowMs) / 60_000))} more min`
-            : 'Token: not yet issued',
+          trustedMinutes !== undefined ? `Token: trusted ~${trustedMinutes} more min` : 'Token: not yet issued',
         );
-        return text(lines.join('\n'));
+        // The same facts as fields, so a client can pace itself without parsing
+        // the prose: the budget arithmetic, the cache counters and the token
+        // clock are the reasons this tool exists.
+        const totalReads = cache.hits + cache.staleServed + cache.misses;
+        return withData(lines.join('\n'), {
+          mode: deps.fixtureMode ? 'fixture' : 'live',
+          budget: {
+            used: budget.used,
+            limit: budget.limit,
+            remaining: budget.remaining,
+            resetsAtUtc: budget.resetsAtUtc,
+          },
+          minute: { used: minute.used, limit: minute.limit },
+          cache: {
+            enabled: cache.enabled,
+            hits: cache.hits,
+            staleServed: cache.staleServed,
+            misses: cache.misses,
+            refreshes: cache.refreshes,
+            entries: cache.entries,
+            ...(cache.enabled && totalReads > 0
+              ? { hitRatePct: Math.round(((cache.hits + cache.staleServed) / totalReads) * 100) }
+              : {}),
+          },
+          token:
+            trustedUntil === undefined
+              ? { issued: false }
+              : { expiresAt, trustedUntil, trustedMinutes },
+          ...(deps.sampler === undefined ? {} : { sampling: deps.sampler.describe() }),
+        });
       },
     },
   ];

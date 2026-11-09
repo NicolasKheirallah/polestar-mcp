@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { DOMAINS, toolName } from '../src/domains.js';
 import { historyToolNames } from '../src/history-tools.js';
+import { extraHistoryToolNames } from '../src/extra-history-tools.js';
 import { StdioMcpClient } from './stdio-client.js';
 
 const PROJECT_ROOT = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -20,11 +21,14 @@ const VIN = 'YSMTEST22PL000001';
 const aggregateTools = [
   'list_vehicles',
   'list_domains',
+  'list_vehicle_domains',
   'get_car_status',
   'is_car_secure',
   'get_needs_attention',
   'get_charging_estimate',
+  'get_charging_setup',
   'plan_cheapest_charge',
+  'get_departure_readiness',
   'polestar_status',
 ];
 
@@ -47,7 +51,7 @@ try {
   // Tool registry: every domain tool + aggregates + history tools.
   const tools0 = await client.request('tools/list', {});
   const toolNames = ((tools0.result?.tools as { name: string }[] | undefined) ?? []).map((t) => t.name);
-  const expected = new Set<string>([...aggregateTools, ...DOMAINS.map(toolName), ...historyToolNames]);
+  const expected = new Set<string>([...aggregateTools, ...DOMAINS.map(toolName), ...historyToolNames, ...extraHistoryToolNames]);
   const actual = new Set<string>(toolNames);
   if (actual.size !== expected.size || ![...expected].every((n) => actual.has(n))) {
     throw new Error(

@@ -13,6 +13,7 @@ import { domainToolSpecs } from '../src/domain-tools.js';
 import { aggregateToolSpecs } from '../src/aggregate-tools.js';
 import { advisorToolSpecs } from '../src/advisor-tools.js';
 import { historyToolSpecs } from '../src/history-tools.js';
+import { extraHistoryToolSpecs } from '../src/extra-history-tools.js';
 import { systemToolSpecs } from '../src/system-tools.js';
 import { toolNames, type ToolSpec } from '../src/tools.js';
 import type { ToolDeps } from '../src/tool-output.js';
@@ -30,7 +31,10 @@ const families: Array<[string, ToolSpec[]]> = [
   ['domain', domainToolSpecs(deps)],
   ['aggregate', aggregateToolSpecs(deps)],
   ['advisor', advisorToolSpecs(deps)],
-  ['history', historyToolSpecs({ ...deps, store: {} } as never)],
+  ['history', [
+    ...historyToolSpecs({ ...deps, store: {} } as never),
+    ...extraHistoryToolSpecs({ ...deps, store: {} } as never),
+  ]],
   ['system', systemToolSpecs({ ...deps, budget: {}, minute: {}, cacheStats: undefined, tokenExpiresAt: () => undefined, fixtureMode: false } as never)],
 ];
 

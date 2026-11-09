@@ -238,7 +238,7 @@ function checkEnvVars() {
   walk(path.join(ROOT, 'src'));
   if (names.size === 0) fail('ENVVARS_CHECK_FAILED: no POLESTAR_* variables found in src/');
 
-  const docs = ['docs/getting-started.md', 'README.md'].map((rel) => ({
+  const docs = ['docs/getting-started.md', 'README.md', '.env.example'].map((rel) => ({
     rel,
     text: readFileSync(path.join(ROOT, rel), 'utf8'),
   }));

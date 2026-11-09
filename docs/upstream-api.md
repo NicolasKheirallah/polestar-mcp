@@ -29,7 +29,7 @@ The token endpoint is `POST {base}/token` with a JSON body:
 }
 ```
 
-The scope is optional on the wire. This server always sends the deduplicated union of its 15 domain scopes (see the scope column in the [tool table](tools-reference.md#the-domain-tools-15--list_vehicles--list_domains)), so one token covers every tool call. The response carries at least `accessToken` and `expiresIn` (seconds); the client caches it until `expiresIn` minus a five minute skew.
+The scope is optional on the wire. This server always sends the deduplicated union of its 15 domain scopes (see the scope column in the [tool table](tools-reference.md#the-domain-tools-15--list_vehicles--list_domains--list_vehicle_domains)), so one token covers every tool call. The response carries at least `accessToken` and `expiresIn` (seconds); the client caches it until `expiresIn` minus a five minute skew.
 
 Token-endpoint errors come back in one of two shapes, and the client reads both:
 

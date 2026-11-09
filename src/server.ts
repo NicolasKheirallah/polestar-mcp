@@ -19,9 +19,10 @@ import { domainToolSpecs } from './domain-tools.js';
 import { aggregateToolSpecs } from './aggregate-tools.js';
 import { advisorToolSpecs } from './advisor-tools.js';
 import { historyToolNames, historyToolSpecs } from './history-tools.js';
+import { extraHistoryToolNames, extraHistoryToolSpecs } from './extra-history-tools.js';
 import { systemToolSpecs } from './system-tools.js';
 import { registerTools, toolNames, type ToolSpec } from './tools.js';
-import { accountIdLooksLikeClientId, InvalidConfigError, loadConfig, loadEnvFileInto, unknownEnvFatal, unknownEnvVariables, type Config } from './config.js';
+import { accountIdLooksLikeClientId, InvalidConfigError, KNOWN_ENV_VARIABLES, loadConfig, loadEnvFileInto, unknownEnvFatal, unknownEnvVariables, type Config } from './config.js';
 import { HistorySampler, SAMPLED_DOMAINS } from './sampler.js';
 import { HistoryStore } from './history.js';
 import { readDomain } from './vehicle-read.js';
@@ -84,7 +85,15 @@ export function buildEngine(env: NodeJS.ProcessEnv): Engine {
       );
     }
   }
-  const budget = new BudgetMeter(config.budgetLimit);
+  // The optional ledger makes the daily count survive a restart and be shared
+  // by two processes holding the same credential; without it the meter is the
+  // in-memory count it always was. Identity is hashed by the ledger itself.
+  const budget = new BudgetMeter(config.budgetLimit, {
+    ledger:
+      config.budgetLedgerPath === undefined
+        ? undefined
+        : { path: config.budgetLedgerPath, clientId: config.clientId, accountId: config.accountId },
+  });
   const minute = new MinuteWindowMeter(config.budgetPerMinute);
   const store = config.historyDir ? new HistoryStore(config.historyDir) : undefined;
 
@@ -232,7 +241,20 @@ export function createMcpServer(engine: Engine, options: McpSurfaceOptions = {})
       fixtureMode: engine.config.fixturesDir !== undefined,
       ...(engine.sampler === undefined ? {} : { sampler: engine.sampler }),
     }),
-    ...(store === undefined ? [] : historyToolSpecs({ ...deps, store })),
+    // Three derived history tools read only the local store: trips, a
+    // cross-domain timeline and the weekly digest. They need the same store
+    // and the location switch the aggregate reads honour.
+    ...(store === undefined
+      ? []
+      : [
+          ...historyToolSpecs({ ...deps, store }),
+          ...extraHistoryToolSpecs({
+            ...deps,
+            store,
+            allowLocation: engine.config.allowLocation,
+            backgroundSampling: engine.config.sample ? 'on' : 'off',
+          }),
+        ]),
   ];
 
   // The instructions are generated from the surface the process actually
@@ -483,7 +505,7 @@ export function buildInstructions(input: InstructionsInput): string {
     `Prefer ${input.aggregates.join(' or ')} over the ${input.domainCount} individual domain reads; every live call spends a shared allowance of ${input.budgetLimit.toLocaleString('en-US')} calls/day and ${input.minuteLimit}/minute, and polestar_status reports what is left.`,
     'Every payload carries an age: charging configuration can be days old while telemetry is minutes old, so read the age before treating a value as current.',
     ...(input.history
-      ? [`History tools (${historyToolNames.join(', ')}) answer from the local history store and are empty until a read has been recorded.`]
+      ? [`History tools (${[...historyToolNames, ...extraHistoryToolNames].join(', ')}) answer from the local history store and are empty until a read has been recorded.`]
       : []),
     `Distances are rendered in ${input.units === 'mi' ? 'miles' : 'kilometres'}.`,
     ...(input.delegated
@@ -571,6 +593,29 @@ function registerPrompts(server: McpServer, specs: readonly PromptSpec[]): void 
 }
 
 /**
+ * Upper bound on one JSON-RPC request body in HTTP mode, 4 MiB.
+ *
+ * A JSON-RPC tool call is a VIN, a domain name and sometimes an hourly price
+ * array; 4 MiB is far above the largest legitimate call and matches the SDK
+ * transport's own default. The limit is pinned here so it is an explicit,
+ * documented number rather than an inherited one, and so an oversized body is a
+ * clear JSON error instead of a slow buffer.
+ */
+export const MAX_HTTP_REQUEST_BYTES = 4 * 1024 * 1024;
+
+/** The 413 body an oversized request gets: the same JSON-RPC error shape a client parses elsewhere. */
+export function payloadTooLargeBody(limitBytes: number = MAX_HTTP_REQUEST_BYTES): string {
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    id: null,
+    error: {
+      code: -32000,
+      message: `Payload Too Large: one request body must not exceed ${limitBytes} bytes.`,
+    },
+  });
+}
+
+/**
  * The HTTP request gate for one bound listener: Host, Origin and bearer token,
  * all decided from headers before the transport reads a byte of the body.
  *
@@ -578,8 +623,14 @@ function registerPrompts(server: McpServer, specs: readonly PromptSpec[]): void 
  * `decideHttpRequest` alone cannot prove: this is the function the listener
  * actually installs first.
  */
-export function createHttpHandler(engine: Engine, bind: BindSuccess): (req: IncomingMessage, res: ServerResponse) => void {
+/** Optional per-listener limits; production uses the constants, a test may lower them. */
+export interface HttpHandlerOptions {
+  maxRequestBytes?: number;
+}
+
+export function createHttpHandler(engine: Engine, bind: BindSuccess, options: HttpHandlerOptions = {}): (req: IncomingMessage, res: ServerResponse) => void {
   const token = bind.token;
+  const maxRequestBytes = options.maxRequestBytes ?? MAX_HTTP_REQUEST_BYTES;
   return (req: IncomingMessage, res: ServerResponse) => {
     const guard = decideHttpRequest({
       boundHost: bind.host,
@@ -595,13 +646,36 @@ export function createHttpHandler(engine: Engine, bind: BindSuccess): (req: Inco
       res.writeHead(401, { 'content-type': 'application/json', 'www-authenticate': 'Bearer' }).end(unauthenticatedBody());
       return;
     }
+    // An oversized body is refused from its declared length alone, so a 5 MB
+    // call costs one header parse instead of a buffer. A chunked body declares
+    // no length; the transport's own cap below stops that read at the same
+    // bound. Both answers are 413 with a JSON-RPC error body.
+    const declared = Number(req.headers['content-length']);
+    if (Number.isFinite(declared) && declared > maxRequestBytes) {
+      res.writeHead(413, { 'content-type': 'application/json', connection: 'close' }).end(payloadTooLargeBody(maxRequestBytes));
+      return;
+    }
     // Stateless mode: each request is an independent JSON-RPC exchange over one
     // shared engine (cache, budget, history). Tools, resources and prompts are
     // served; subscriptions are not, and the surface below says so in its
     // capabilities, because the surface that would poll is closed with this
     // response and its notification channel goes with it.
+    //
+    // One surface per request is deliberate. Measured on this tree (Node 22,
+    // fixture engine, 200 iterations, registry of 26 tools): createMcpServer
+    // costs median 0.19 ms / p95 1.10 ms, and a whole stateless initialize POST
+    // costs median 0.48 ms / p95 1.74 ms. Building the tool-spec families is
+    // 0.029 ms of that, about 6% of one request; the McpServer construction and
+    // its registrations are the rest and cannot be shared because the instance
+    // holds this request's protocol state. A cached spec array would therefore
+    // buy a few percent while adding an engine-keyed cache whose invalidation
+    // would need its own tests, so it is not done; revisit if registration cost
+    // grows with the registry.
     void (async () => {
-      const transport = new NodeStreamableHTTPServerTransport({ enableJsonResponse: true });
+      const transport = new NodeStreamableHTTPServerTransport({
+        enableJsonResponse: true,
+        maxRequestBodySize: maxRequestBytes,
+      });
       const surface = createMcpServer(engine, { subscriptions: false });
       res.on('close', () => {
         void transport.close();
@@ -685,25 +759,57 @@ function handleCliArgs(): boolean {
     // stdout is reserved for the protocol while serving, but these answers exit
     // before any transport is connected, so they belong on stdout like --version.
     // Writing help to stderr made `polestar-mcp --help > file` produce an empty file.
-    console.log(
-      [
-        `polestar-mcp ${PKG_VERSION}, read-only Polestar Data Portal MCP server over stdio (or Streamable HTTP).`,
-        '',
-        'There are no positional arguments; configuration is environment-only.',
-        '  POLESTAR_CLIENT_ID / POLESTAR_CLIENT_SECRET / POLESTAR_ACCOUNT_ID   required for live mode',
-        '  POLESTAR_FIXTURES_DIR=<dir>                        offline mode, no credentials needed',
-        '  POLESTAR_HTTP_PORT=<port>                          serve Streamable HTTP instead of stdio',
-        '  POLESTAR_ALLOW_LOCATION=false                      never request or return vehicle position',
-        '',
-        'Put the three values in ~/.config/polestar-mcp/.env.secrets (see .env.example); real',
-        'environment variables always win. Every variable the server reads is listed there, an',
-        'unrecognized POLESTAR_* name is reported at startup, because a typo is otherwise invisible.',
-        'Docs: docs/getting-started.md, docs/tools-reference.md, docs/upstream-api.md.',
-      ].join('\n'),
-    );
+    console.log(helpText());
     return true;
   }
   return false;
+}
+
+/**
+ * The `--help` text, generated from the configuration registry rather than
+ * restated by hand.
+ *
+ * It used to show four hand-picked settings and claim every variable was listed
+ * in `.env.example` while that file was short by five names. The complete list
+ * now comes from KNOWN_ENV_VARIABLES, and the `.env.example` sentence no longer
+ * asserts completeness, because the file is owned by the release lane and a
+ * claim about it can go stale without this file changing.
+ */
+export function helpText(): string {
+  return [
+    `polestar-mcp ${PKG_VERSION}, read-only Polestar Data Portal MCP server over stdio (or Streamable HTTP).`,
+    '',
+    'There are no positional arguments; configuration is environment-only.',
+    '  POLESTAR_CLIENT_ID / POLESTAR_CLIENT_SECRET / POLESTAR_ACCOUNT_ID   required for live mode',
+    '  POLESTAR_FIXTURES_DIR=<dir>                        offline mode, no credentials needed',
+    '  POLESTAR_HTTP_PORT=<port>                          serve Streamable HTTP instead of stdio',
+    '  POLESTAR_ALLOW_LOCATION=false                      never request or return vehicle position',
+    '',
+    `Every variable the server reads (${KNOWN_ENV_VARIABLES.length} names):`,
+    ...wrapNames(KNOWN_ENV_VARIABLES),
+    '',
+    'The same names are documented in .env.example and docs/getting-started.md, as a template to',
+    'copy; real environment variables always win, and an unrecognized POLESTAR_* name is reported',
+    'at startup because a typo is otherwise invisible.',
+    `HTTP mode caps one request body at ${MAX_HTTP_REQUEST_BYTES / (1024 * 1024)} MiB; a larger body gets a 413 JSON error.`,
+    'Docs: docs/getting-started.md, docs/tools-reference.md, docs/upstream-api.md.',
+  ].join('\n');
+}
+
+/** Wrap the complete variable list over indented lines, so it stays readable and copyable. */
+function wrapNames(names: readonly string[], width = 92): string[] {
+  const lines: string[] = [];
+  let current = '';
+  for (const name of names) {
+    if (current !== '' && current.length + 1 + name.length > width) {
+      lines.push(current);
+      current = name;
+      continue;
+    }
+    current = current === '' ? name : `${current} ${name}`;
+  }
+  if (current !== '') lines.push(current);
+  return lines.map((line) => `  ${line}`);
 }
 
 export async function main(env: NodeJS.ProcessEnv = process.env): Promise<void> {

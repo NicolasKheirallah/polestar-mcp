@@ -185,6 +185,9 @@ export interface ChargingSession {
   /** Highest reported charging power. Absent when no sample in the session reported
    * power at all: an unreported value is not a measured zero. */
   peakPowerWatts?: number | undefined;
+  /** Charge level at the first and last sample, for the energy a session added. */
+  startChargeLevelPct?: number | undefined;
+  endChargeLevelPct?: number | undefined;
   maxChargeLevelPct?: number | undefined;
   sampleCount: number;
 }
@@ -249,11 +252,15 @@ export function extractChargingSessions(samples: HistoryRecord[], gapMs = 30 * 6
     const s = current.samples;
     const levels = s.map((x) => x.level).filter((l): l is number => l !== undefined);
     const powers = s.map((x) => x.power).filter((p): p is number => p !== undefined);
+    const firstLevel = s.find((x) => x.level !== undefined)?.level;
+    const lastLevel = [...s].reverse().find((x) => x.level !== undefined)?.level;
     sessions.push({
       startedAt: s[0]!.at,
       lastSeenAt: s[s.length - 1]!.at,
       activeSeconds: Math.round((s[s.length - 1]!.at - s[0]!.at) / 1000),
       ...(powers.length > 0 ? { peakPowerWatts: powers.reduce((max, p) => Math.max(max, p), 0) } : {}),
+      ...(firstLevel !== undefined ? { startChargeLevelPct: firstLevel } : {}),
+      ...(lastLevel !== undefined ? { endChargeLevelPct: lastLevel } : {}),
       ...(levels.length > 0 ? { maxChargeLevelPct: levels.reduce((max, l) => Math.max(max, l), 0) } : {}),
       sampleCount: s.length,
     });
@@ -301,3 +308,125 @@ export function degradationSeries(samples: HistoryRecord[]): DegradationPoint[] 
   return points;
 }
 
+
+/** The percentile of a two-sided 95 percent Student t distribution, for small-sample intervals. */
+export function tCritical95(df: number): number {
+  if (!Number.isFinite(df) || df < 1) return 12.706;
+  // A short table is honest about approximation; above 30 degrees of freedom the
+  // normal value is close enough for a range trend read by a person.
+  const table = [12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.201, 2.179, 2.16, 2.145, 2.131, 2.12, 2.11, 2.101, 2.093, 2.086, 2.08, 2.074, 2.069, 2.064, 2.06, 2.056, 2.052, 2.048, 2.045, 2.042];
+  const index = Math.min(Math.floor(df), table.length) - 1;
+  return table[Math.max(0, index)]!;
+}
+
+export interface LinearTrend {
+  /** Change of y per day of x. */
+  slopePerDay: number;
+  /** Change of y per 30.44-day month, the unit a person reads. */
+  slopePerMonth: number;
+  /** 95 percent confidence interval for the monthly slope. */
+  monthlyLow: number;
+  monthlyHigh: number;
+  n: number;
+  df: number;
+  /** True when the interval excludes zero, the only case the caller may call a trend. */
+  excludesZero: boolean;
+}
+
+/**
+ * Ordinary least-squares slope with a 95 percent interval. `x` is days since the
+ * first point and `y` is the value being trended. Fewer than three points has no
+ * residual degrees of freedom, so it answers undefined instead of a slope.
+ */
+export function linearTrend(points: readonly { x: number; y: number }[]): LinearTrend | undefined {
+  const n = points.length;
+  if (n < 3) return undefined;
+  const meanX = points.reduce((sum, p) => sum + p.x, 0) / n;
+  const meanY = points.reduce((sum, p) => sum + p.y, 0) / n;
+  let sxx = 0;
+  let sxy = 0;
+  for (const point of points) {
+    sxx += (point.x - meanX) ** 2;
+    sxy += (point.x - meanX) * (point.y - meanY);
+  }
+  if (sxx === 0) return undefined;
+  const slope = sxy / sxx;
+  const intercept = meanY - slope * meanX;
+  let residual = 0;
+  for (const point of points) residual += (point.y - (intercept + slope * point.x)) ** 2;
+  const df = n - 2;
+  if (df < 1) return undefined;
+  const standardError = Math.sqrt(residual / df / sxx);
+  const margin = tCritical95(df) * standardError;
+  const perMonth = 30.44;
+  return {
+    slopePerDay: slope,
+    slopePerMonth: slope * perMonth,
+    monthlyLow: (slope - margin) * perMonth,
+    monthlyHigh: (slope + margin) * perMonth,
+    n,
+    df,
+    excludesZero: slope - margin > 0 || slope + margin < 0,
+  };
+}
+
+/** Median of the finite values, used to combine per-sample capacity estimates. */
+export function median(values: readonly number[]): number | undefined {
+  const finite = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (finite.length === 0) return undefined;
+  const middle = Math.floor(finite.length / 2);
+  return finite.length % 2 === 1 ? finite[middle] : (finite[middle - 1]! + finite[middle]!) / 2;
+}
+
+export interface OdometerRate {
+  /** Kilometres per day from the usable steps, absent when there were none. */
+  kmPerDay?: number | undefined;
+  /** Days between the first and last usable sample, a span not an observing time. */
+  spanDays?: number | undefined;
+  /** Number of odometer samples that carried a reading. */
+  samples: number;
+  /** Steps discarded because the odometer went backwards, i.e. a reset or a replaced unit. */
+  resets: number;
+}
+
+/**
+ * Distance rate from odometer records. A decreasing odometer is a reset, not
+ * negative distance, so backward steps are discarded and counted; forward steps
+ * with no elapsed time are ignored too. The rate is distance-weighted, so a
+ * long parked gap does not pretend the car drove during it.
+ */
+export function odometerRate(samples: HistoryRecord[]): OdometerRate {
+  const readings: { at: number; meters: number }[] = [];
+  for (const record of samples) {
+    const stored = record.data;
+    if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) continue;
+    const meters = (stored as Record<string, unknown>).odometerMeters;
+    if (typeof meters !== 'number' || !Number.isFinite(meters)) continue;
+    readings.push({ at: recordTimeMs(record), meters });
+  }
+  readings.sort((a, b) => a.at - b.at);
+  let metres = 0;
+  let ms = 0;
+  let resets = 0;
+  for (let i = 1; i < readings.length; i++) {
+    const previous = readings[i - 1]!;
+    const current = readings[i]!;
+    const deltaMeters = current.meters - previous.meters;
+    const deltaMs = current.at - previous.at;
+    if (deltaMeters < 0) {
+      resets += 1;
+      continue;
+    }
+    if (deltaMs <= 0) continue;
+    metres += deltaMeters;
+    ms += deltaMs;
+  }
+  const first = readings[0];
+  const last = readings[readings.length - 1];
+  return {
+    ...(ms > 0 ? { kmPerDay: metres / 1000 / (ms / 86_400_000) } : {}),
+    ...(first !== undefined && last !== undefined ? { spanDays: (last.at - first.at) / 86_400_000 } : {}),
+    samples: readings.length,
+    resets,
+  };
+}

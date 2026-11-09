@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, truncateSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, truncateSync } from 'node:fs';
 import { PolestarApiError } from '../src/client.js';
 import { describeError, errorResult } from '../src/tool-output.js';
 import { clientFor, readDomain, readDomainFormatted } from '../src/vehicle-read.js';
@@ -129,6 +129,27 @@ test('does not retry non-retryable statuses', async () => {
   const res = await retrying.fetch('https://api.test/m2m/v1/vehicles');
   assert.equal(res.status, 404);
   assert.equal(inner.attempts, 1);
+});
+
+test('a retry attempt is counted in the shared ledger, not only in memory', async () => {
+  // One logical read can be two live calls, and the API counts both. A
+  // ledger-backed meter must persist each attempt as it happens, or a restart
+  // would forget the extra call the credential already spent.
+  const dir = mkdtempSync(path.join(tmpdir(), 'polestar-ledger-retry-'));
+  try {
+    const ledger = { path: path.join(dir, 'budget.json'), clientId: 'client-1', accountId: 'account-1' };
+    const now = Date.UTC(2026, 10, 9, 12, 0, 0);
+    const inner = new ScriptedTransport([{ status: 502, body: 'bad gateway' }, ok({ fine: true })]);
+    const budget = new BudgetMeter(10, { now: () => now, ledger });
+    const retrying = new RetryingTransport(inner, { budget, now: () => now, sleep: async () => undefined });
+    const res = await retrying.fetch('https://api.test/m2m/v1/vehicles');
+    assert.equal(res.status, 200);
+    assert.equal(inner.attempts, 2);
+    const restarted = new BudgetMeter(10, { now: () => now, ledger });
+    assert.equal(restarted.snapshot().used, 2, 'both attempts survive a restart, because Polestar counted both');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 const DOMAIN_URL = 'https://api.test/m2m/v1/vehicles/VIN1234567890123/telemetry/battery';

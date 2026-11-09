@@ -8,7 +8,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for the [Pole
 
 ![version](https://img.shields.io/badge/version-0.3.0-blue)
 ![node](https://img.shields.io/badge/node-%3E%3D20.11-green)
-![tools](https://img.shields.io/badge/tools-26-blueviolet)
+![tools](https://img.shields.io/badge/tools-36-blueviolet)
 ![API](https://img.shields.io/badge/Polestar_API-read_only-orange)
 ![offline demo](https://img.shields.io/badge/offline_demo-yes-success)
 
@@ -32,6 +32,8 @@ Every answer is a read. Polestar's documented v1 API publishes no write endpoint
 | "Plan the cheapest charging tonight" | `plan_cheapest_charge` | A schedule of hours, given a spot-price curve you paste in |
 | "Where is the car?" | `get_location` | Last known position with heading, speed, and data age |
 | "How has the battery aged?" | `get_degradation_report` | Capacity and range trends (needs history, see below) |
+| "What is my charging setup?" | `get_charging_setup` | The seven charging settings in one answer, each with its age |
+| "Will the car be ready by Sunday at 14:00?" | `get_departure_readiness` | A yes or no with the charge deadline, or a refusal when the timer cannot support it |
 
 Domain tools answer in short prose with the data age in the header, and `raw: true` appends the untouched API payload. A successful result sends that text once plus structured data where a tool has one; `structuredContent.message` is used on failures, not on success.
 
@@ -99,6 +101,7 @@ Naming is mechanical: API domain `target-soc` becomes tool `get_target_soc`. Eve
 | **Discovery** | |
 | `list_vehicles` | VINs, or your friendly names, that this credential may access |
 | `list_domains` | The server's own registry: every domain with endpoint, scope, and tool name |
+| `list_vehicle_domains` | Which of the 15 domains this car reports, which are absent or refused, with data ages |
 | **Telemetry** | |
 | `get_availability` | Whether the car is reachable/awake, and its usage mode |
 | `get_battery` | Charge level, charging status and power, range, time to full, consumption, usable energy |
@@ -121,15 +124,24 @@ Naming is mechanical: API domain `target-soc` becomes tool `get_target_soc`. Eve
 | `is_car_secure` | Yes/no security verdict that names anything open |
 | `get_needs_attention` | Active health warnings only, plus the service countdown |
 | `get_charging_estimate` | Energy and time to reach the target SoC, assumptions stated |
+| `get_charging_setup` | The seven charging settings in one call, each with its data age |
 | `plan_cheapest_charge` | Cheapest hours inside the car's charge window, given your spot prices |
+| `get_departure_readiness` | Whether the car can be charged and preconditioned by a departure time |
 | **System** | |
 | `polestar_status` | Budget used and remaining with reset time, cache hit rate, token expiry, mode |
 | **History** (opt-in) | |
 | `get_history` | Recorded samples for one domain, one line per change |
-| `get_degradation_report` | Implied full-charge range and capacity trend over history |
+| `get_degradation_report` | Implied full-charge range and capacity trend over history, with a 95% interval once the span allows it |
 | `get_charging_sessions` | Charging sessions reconstructed from battery samples |
+| `get_charging_cost` | Energy and cost of each recorded session, assumptions and missing prices named |
+| `get_warning_changes` | Warnings that appeared or cleared between recorded health samples |
+| `get_service_forecast` | Which service limit arrives first, from the car's countdown and your odometer rate |
+| `get_settings_history` | Recorded changes to charging settings, dated by the value clock |
+| `get_trips` | Trips reconstructed from odometer history, gaps and resets named |
+| `get_timeline` | Cross-domain timeline of what changed, over a window of hours |
+| `get_weekly_digest` | One seven-day digest: distance, charge, warnings, settings |
 
-The fifteen `get_*` domain tools map one-to-one onto the API's fifteen read domains (eight telemetry, seven charging), each with its endpoint and OAuth scope embedded in the tool description. The full mapping, scopes, and worked examples are in [docs/tools-reference.md](docs/tools-reference.md).
+The fifteen `get_*` domain tools map one-to-one onto the API's fifteen read domains (eight telemetry, seven charging). `list_vehicle_domains` answers the car-level question of which of those domains this vehicle reports. The endpoint and OAuth scope for every Domain are printed by `list_domains`; the full mapping, scopes, and worked examples are in [docs/tools-reference.md](docs/tools-reference.md).
 
 ## Resources, prompts, and subscriptions
 
@@ -144,7 +156,7 @@ Polestar's M2M credential allows 10,000 calls per client per day, roughly seven 
 
 ```mermaid
 flowchart LR
-    C["MCP client<br/>stdio or HTTP"] --> T["26 read tools<br/>humanized, data age"]
+    C["MCP client<br/>stdio or HTTP"] --> T["36 read tools<br/>humanized, data age"]
     T --> K["PolestarClient<br/>VIN resolution<br/>identity checks"]
     K --> H["Cache<br/>per-domain TTLs<br/>stale-while-revalidate"]
     H --> R["Retry<br/>429 / 502 / 503<br/>Retry-After"]
@@ -155,7 +167,7 @@ flowchart LR
 
 - **Cache first.** Each URL gets a TTL matched to how fast the value can change: battery, location, and exterior 30 seconds; availability, odometer, and parking climatization 60 seconds; charging settings 5 minutes; health 10 minutes; pre-cleaning 30 minutes; the vehicle list 1 hour. An expired entry serves the last known value immediately (marked stale) while a single-flight refresh runs in the background, so latency never waits on Polestar.
 - **Retry with limits.** 429 responses (honoring `Retry-After` when present) and 502/503 gateway errors are retried up to three times with capped backoff. Every attempt, retries included, is metered before it goes out.
-- **Fail closed.** When the day's budget is spent, the server refuses further calls with the reset time in the error instead of spending calls it does not have. `polestar_status` shows exactly where you stand, and the resource poller and history sampler stand down on their own (at 90% and 80% spent respectively) so background features never eat the quota you need for real questions.
+- **Fail closed.** When the day's budget is spent, the server refuses further calls with the reset time in the error instead of spending calls it does not have. The counter lives in memory by default; set `POLESTAR_BUDGET_LEDGER` to an absolute path to share it across restarts and processes. `polestar_status` shows exactly where you stand, and the resource poller and history sampler stand down on their own (at 90% and 80% spent respectively) so background features never eat the quota you need for real questions.
 - **Tokens are managed.** One token request covers the union of all domain scopes (trim it with `POLESTAR_SCOPES` for least privilege), tokens are cached until expiry minus a 5-minute skew, concurrent callers share one request, and a 401 triggers exactly one fresh-token retry.
 
 ## History, sampling, and privacy
@@ -175,7 +187,7 @@ Three dials control what leaves your car and how it is named:
 Set `POLESTAR_HTTP_PORT=8420 npm start` and the same engine serves tools, resources, and prompts over stateless Streamable HTTP: each request is independent, while cache, budget, and history are shared. It binds `127.0.0.1` by default; binding any other address requires `POLESTAR_HTTP_TOKEN`, because a server that reads vehicle location must not sit unauthenticated on a shared network. Browser cross-origin requests are refused unless the `Origin` matches the request host or appears in `POLESTAR_HTTP_ALLOWED_ORIGINS`; a forged `Host` is refused the same way. Resources work in both modes. Subscriptions do not: a stateless request's surface is closed as its response ends, so a poller would be stopped before its first tick, and the server answers `resources/subscribe` with an error and advertises `subscribe: false` in the handshake rather than accepting one that can never fire. Use stdio for subscriptions.
 
 <details>
-<summary><strong>Full configuration reference (28 variables)</strong></summary>
+<summary><strong>Full configuration reference (29 variables)</strong></summary>
 
 The server knows exactly which variables it reads and warns about unrecognized ones (suggesting the closest real name); with `POLESTAR_STRICT_ENV=1` a typo is fatal instead of a warning. A value that is present but unusable, a bad URL, a non-numeric timeout, an out-of-range port, fails fast with the fix in the message.
 
@@ -193,6 +205,7 @@ The server knows exactly which variables it reads and warns about unrecognized o
 | `POLESTAR_TIMEOUT_MS` | 15000 | Hard deadline per HTTP request |
 | `POLESTAR_BUDGET` | 10000 | Daily live-call ceiling; fails closed at the limit |
 | `POLESTAR_BUDGET_PER_MINUTE` | 100 | Rolling per-minute ceiling the API also publishes; waited out rather than failed, when the wait fits the deadline |
+| `POLESTAR_BUDGET_LEDGER` | unset | Absolute path to a JSON file that keeps the daily call count across restarts and processes; unset keeps the meter in memory |
 | `POLESTAR_CACHE` | on | `off` disables the response cache |
 | `POLESTAR_SCOPES` | all domain scopes | Space- or comma-separated scope override for the token request |
 | `POLESTAR_HISTORY_DIR` | unset | Enable the JSONL history store (and history tools) here |
@@ -247,18 +260,21 @@ Every API error carries the `requestId` and `timestamp` Polestar support can loo
 | Document | Contents |
 | --- | --- |
 | [Getting started](docs/getting-started.md) | Credentials, every variable explained, first calls, troubleshooting |
-| [Tool reference](docs/tools-reference.md) | All 26 tools, endpoints and scopes, example responses |
+| [Tool reference](docs/tools-reference.md) | All 36 tools, endpoints and scopes, example responses |
 | [Architecture](docs/architecture.md) | The client module, the cache/retry/budget chain, history, resources, HTTP mode |
 | [The upstream API contract](docs/upstream-api.md) | Authentication, headers, envelope, errors, rate limits |
 | [Live contract findings](docs/live-contract-findings.md) | What live probes settled about identity headers, VINs, domains, errors, and the token endpoint |
 | [Development and verification](docs/development.md) | The test map, the CI checks, adding a tool |
 | [Consumer API adapter note](docs/consumer-adapter-note.md) | Why the consumer app API stays unwired, and the shape when it lands |
 | [Write endpoints](docs/write-endpoints.md) | The designed but dormant write surface and its safety rules |
+| [Privacy policy](docs/privacy.md) | What is processed, where it goes, what stays local, and the owner's controls |
+| [Reviewer pack](docs/reviewer-pack.md) | Sample data, the three example prompts, the directory checklist and the distribution status |
+| [Claude Desktop bundle](docs/bundle.md) | The `.mcpb` manifest and the owner build checklist; the bundle build is blocked on the CLI and a desktop host |
 
 ## Status
 
 The documented v1 API is read-only and this server is read-only with it: every tool carries `readOnlyHint`, and `POLESTAR_ENABLE_WRITES` registers nothing because Polestar publishes no v1 write endpoints. The app-side consumer API (car model details, render images) is deliberately not wired in either. Its GraphQL queries are unpublished and its refresh tokens rotate destructively, so wiring it would mean depending on a contract that can be revoked without notice.
 
-Distribution status: the npm package and the MCP Registry entry are prepared in this tree (the release workflow checks, packs and publishes on a version tag), but they are not published yet. Publishing is blocked on the owner's npm credentials and on npm name availability. Until then, run the server from a clone with `npm ci && npm run build`.
+Distribution status: the npm package and the MCP Registry entry are prepared in this tree (the release workflow checks, packs and publishes on a version tag), but they are not published yet. Publishing is blocked on the owner's npm credentials and on npm name availability. The Claude Desktop `.mcpb` metadata exists in `mcpb/manifest.json`, but the bundle build is blocked on the `mcpb` CLI and a desktop host to test it. Until those land, run the server from a clone with `npm ci && npm run build`. Directory reviewers should start with [docs/reviewer-pack.md](docs/reviewer-pack.md); data handling is described in [docs/privacy.md](docs/privacy.md).
 
 This is a personal project for one owner's Polestar 2. It is not affiliated with or endorsed by Polestar.

@@ -300,6 +300,27 @@ test('a redacted elicitation offers masked choices, and the answer maps back to 
   }
 });
 
+test('a retried redacted answer is mapped back from its masked value', async () => {
+  const vins = ['YSMTEST22PL000001', 'YSMTEST22PL000002'];
+  const client = {
+    async resolveVin(vin?: string) {
+      if (vin !== undefined) return vin;
+      throw new PolestarApiError('AMBIGUOUS_VIN', 'this credential sees two vehicles', 400);
+    },
+    async vehicles() {
+      return vins;
+    },
+    async domain() {
+      return null;
+    },
+  } as unknown as PolestarClient;
+  const deps = { client, redactVin: true, vehicleLabels: {}, delegatedAccounts: [], units: 'km' } as ToolDeps;
+  const ctx = { mcpReq: { inputResponses: { 'pick-vehicle-battery': { action: 'accept', content: { vin: 'YSM…002' } } } } };
+
+  const chosen = await resolveVinOrAsk(deps, ctx, undefined, 'pick-vehicle-battery');
+  assert.equal(chosen.vin, vins[1]);
+});
+
 test('a declined redacted elicitation reports masked identifiers only', async () => {
   const vins = ['YSMTEST22PL000001', 'YSMTEST22PL000002'];
   const client = {
@@ -386,4 +407,39 @@ test('a 403 keeps its code-specific hint instead of claiming a missing scope', a
 
   const scopeProblem = await readDomainFormatted(failing('AUTHZ_SCOPE_MISSING'), domain, {}, {});
   assert.match(String(scopeProblem.structuredContent?.hint), /OAuth scope `pdp-telemetry\/battery`/);
+});
+
+test('aggregate answers carry their values in structured data', async () => {
+  const statusResult = await toolSpec(aggregateToolSpecs(depsFor(FULL_CAR)), 'get_car_status').run({}, {});
+  const status = statusResult.structuredContent?.data as Record<string, unknown>;
+  assert.equal((status.battery as Record<string, unknown>).chargePct, 52);
+  assert.equal((status.battery as Record<string, unknown>).rangeKm, 170);
+  assert.equal((status.exterior as Record<string, unknown>).lockState, 'locked');
+  assert.equal((status.exterior as Record<string, unknown>).alarmState, 'ok');
+  assert.equal(status.odometerMeters, 122_963_000);
+  assert.equal((status.health as Record<string, unknown>).daysToService, 313);
+  assert.equal((status.charging as Record<string, unknown>).targetPct, 80);
+  assert.equal((status.charging as Record<string, unknown>).energyNeededKwh, 18.399);
+  assert.equal((status.agesSeconds as Record<string, number>).battery, 300);
+  assert.deepEqual(status.unreported, []);
+
+  const secure = await toolSpec(aggregateToolSpecs(depsFor(FULL_CAR)), 'is_car_secure').run({}, {});
+  const secureData = secure.structuredContent?.data as Record<string, unknown>;
+  assert.equal(secureData.secure, true);
+  assert.equal(secureData.lockState, 'locked');
+  assert.deepEqual(secureData.openSecurityRelevant, []);
+
+  const attention = await toolSpec(aggregateToolSpecs(depsFor(FULL_CAR)), 'get_needs_attention').run({}, {});
+  const attentionData = attention.structuredContent?.data as Record<string, unknown>;
+  assert.deepEqual(attentionData.warnings, []);
+  assert.equal(attentionData.daysToService, 313);
+
+  const estimate = await toolSpec(aggregateToolSpecs(depsFor(FULL_CAR)), 'get_charging_estimate').run({}, {});
+  const estimateData = estimate.structuredContent?.data as Record<string, unknown>;
+  assert.equal(estimateData.energyNeededKwh, 18.399);
+  assert.equal(estimateData.targetPct, 80);
+  assert.equal(estimateData.targetAssumed, false);
+  assert.equal(estimateData.minutesToTarget, 80);
+  assert.equal(Array.isArray(estimateData.assumptions), true);
+  assert.deepEqual(estimateData.problems, []);
 });

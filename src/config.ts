@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
 import { isLoopbackHost } from './bind.js';
 
 export const DEFAULT_BASE_URL = 'https://pc-api.polestar.com/eu-north-1/data-portal/m2m';
@@ -24,6 +25,11 @@ export interface Config {
   budgetLimit: number;
   /** Per-minute ceiling the API also publishes (100 req/min). */
   budgetPerMinute: number;
+  /**
+   * Persist the daily live-call count in this JSON file so a restart or a second
+   * process continues from the same allowance instead of a fresh one.
+   */
+  budgetLedgerPath?: string;
   /** Explicit scope list override; defaults to the union of all domains. */
   scopes?: string[];
   /** Enable the local history store + background sampler in this directory. */
@@ -90,7 +96,7 @@ export class InvalidConfigError extends Error {
 export const KNOWN_ENV_VARIABLES: readonly string[] = [
   'POLESTAR_CLIENT_ID', 'POLESTAR_CLIENT_SECRET', 'POLESTAR_ACCOUNT_ID', 'POLESTAR_DELEGATED_ACCOUNT_ID', 'POLESTAR_DELEGATED_ACCOUNT_IDS',
   'POLESTAR_BASE_URL', 'POLESTAR_M2M_TOKEN_ENDPOINT', 'POLESTAR_FIXTURES_DIR', 'POLESTAR_ENV_FILE',
-  'POLESTAR_TIMEOUT_MS', 'POLESTAR_BUDGET', 'POLESTAR_BUDGET_PER_MINUTE', 'POLESTAR_CACHE', 'POLESTAR_SCOPES', 'POLESTAR_HISTORY_DIR',
+  'POLESTAR_TIMEOUT_MS', 'POLESTAR_BUDGET', 'POLESTAR_BUDGET_PER_MINUTE', 'POLESTAR_BUDGET_LEDGER', 'POLESTAR_CACHE', 'POLESTAR_SCOPES', 'POLESTAR_HISTORY_DIR',
   'POLESTAR_HISTORY_SAMPLE_SECONDS', 'POLESTAR_SAMPLE', 'POLESTAR_VEHICLE_LABELS', 'POLESTAR_REDACT_VIN', 'POLESTAR_ALLOW_LOCATION', 'POLESTAR_UNITS',
   'POLESTAR_LOG', 'POLESTAR_ENABLE_WRITES', 'POLESTAR_HTTP_PORT', 'POLESTAR_HTTP_HOST', 'POLESTAR_HTTP_TOKEN', 'POLESTAR_HTTP_ALLOWED_ORIGINS', 'POLESTAR_STRICT_ENV',
 ];
@@ -206,6 +212,67 @@ export function normalizeBaseUrl(raw: string, variable = 'POLESTAR_BASE_URL'): s
 }
 
 /**
+ * `POLESTAR_BUDGET_LEDGER`: one JSON file that holds the daily live-call count so
+ * a restart or a second process shares the credential's real allowance. The path
+ * must be absolute and its parent must already exist: a relative path would name
+ * a different file for every working directory, and a typo'd parent would
+ * otherwise create a directory tree nobody asked for. The file itself does not
+ * have to exist yet; the first write creates it.
+ */
+function budgetLedgerPathOrThrow(env: NodeJS.ProcessEnv): string | undefined {
+  const raw = env.POLESTAR_BUDGET_LEDGER?.trim();
+  if (raw === undefined || raw === '') return undefined;
+  if (raw.includes('\u0000')) {
+    throw new InvalidConfigError('POLESTAR_BUDGET_LEDGER', 'contains a NUL byte.', 'Use a normal filesystem path such as /home/you/.local/state/polestar-mcp/budget.json.');
+  }
+  if (raw.startsWith('~')) {
+    throw new InvalidConfigError(
+      'POLESTAR_BUDGET_LEDGER',
+      'starts with ~, which is used literally here (the shell does not expand a value read from a file).',
+      'Use an absolute path such as /home/you/.local/state/polestar-mcp/budget.json.',
+    );
+  }
+  if (!path.isAbsolute(raw)) {
+    throw new InvalidConfigError(
+      'POLESTAR_BUDGET_LEDGER',
+      'is not an absolute path.',
+      'Use an absolute path: a relative path resolves against each process working directory, so two processes would keep two counts.',
+    );
+  }
+  const file = path.resolve(raw);
+  let stats;
+  try {
+    stats = statSync(file);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOTDIR') {
+      throw new InvalidConfigError('POLESTAR_BUDGET_LEDGER', `names ${file}, whose parent is not a directory.`, 'Point the variable at a file under an existing directory.');
+    }
+    if (code !== 'ENOENT') {
+      throw new InvalidConfigError('POLESTAR_BUDGET_LEDGER', `cannot be inspected (${code ?? 'unknown error'}).`, 'Check the path and its permissions.');
+    }
+    const parent = path.dirname(file);
+    let parentStats;
+    try {
+      parentStats = statSync(parent);
+    } catch {
+      throw new InvalidConfigError('POLESTAR_BUDGET_LEDGER', `names ${parent}, which does not exist.`, 'Create that directory first, or point the variable at a file under an existing directory.');
+    }
+    if (!parentStats.isDirectory()) {
+      throw new InvalidConfigError('POLESTAR_BUDGET_LEDGER', `names ${parent}, which is not a directory.`, 'Point the variable at a file under an existing directory.');
+    }
+    return file;
+  }
+  if (stats.isDirectory()) {
+    throw new InvalidConfigError('POLESTAR_BUDGET_LEDGER', `${file} is a directory, not a JSON file.`, 'Point the variable at a file such as /home/you/.local/state/polestar-mcp/budget.json.');
+  }
+  if (!stats.isFile()) {
+    throw new InvalidConfigError('POLESTAR_BUDGET_LEDGER', `${file} is not a regular file.`, 'Point the variable at a regular file that the server may create or replace.');
+  }
+  return file;
+}
+
+/**
  * A numeric setting that is only meaningful above zero. A zero or negative
  * value used to load and fail later inside a meter with a generic message; here
  * the variable and the fix are named before startup does anything.
@@ -305,6 +372,7 @@ function flagEnv(raw: string | undefined, truthy: string[]): boolean {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const fixturesDir = env.POLESTAR_FIXTURES_DIR?.trim() || undefined;
+  const budgetLedgerPath = budgetLedgerPathOrThrow(env);
   const baseUrl = normalizeBaseUrl(env.POLESTAR_BASE_URL?.trim() || DEFAULT_BASE_URL);
   const clientId = env.POLESTAR_CLIENT_ID?.trim() || '';
   const clientSecret = env.POLESTAR_CLIENT_SECRET?.trim() || '';
@@ -342,6 +410,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     timeoutMs: positiveNumberEnv(env, 'POLESTAR_TIMEOUT_MS', 15_000, 'whole number'),
     budgetLimit: positiveNumberEnv(env, 'POLESTAR_BUDGET', 10_000, 'whole number'),
     budgetPerMinute: positiveNumberEnv(env, 'POLESTAR_BUDGET_PER_MINUTE', 100, 'whole number'),
+    ...(budgetLedgerPath !== undefined ? { budgetLedgerPath } : {}),
     historySampleSeconds: positiveNumberEnv(env, 'POLESTAR_HISTORY_SAMPLE_SECONDS', 600, 'whole number'),
     sample: flagEnv(env.POLESTAR_SAMPLE, TRUTHY_ENV),
     httpPort: httpPortOrThrow(env),

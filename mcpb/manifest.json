@@ -1,0 +1,74 @@
+{
+  "manifest_version": "0.3",
+  "name": "polestar-mcp",
+  "display_name": "Polestar",
+  "version": "0.3.0",
+  "description": "Read-only Polestar Data Portal (M2M) telemetry and charging for MCP clients.",
+  "long_description": "Ask your Polestar questions in plain language and get answers from what the car reports: charge and range, locks and openings, service countdown, charging settings and windows, position when allowed, and an opt-in local history for battery and charging trends. Every tool is a read; the published Data Portal v1 API has no write endpoint.",
+  "author": {
+    "name": "Nicolas Kheirallah",
+    "url": "https://github.com/nicolaskheirallah"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicolaskheirallah/polestar-mcp.git"
+  },
+  "homepage": "https://github.com/nicolaskheirallah/polestar-mcp#readme",
+  "documentation": "https://github.com/nicolaskheirallah/polestar-mcp/blob/master/docs/getting-started.md",
+  "support": "https://github.com/nicolaskheirallah/polestar-mcp/issues",
+  "license": "MIT",
+  "keywords": ["polestar", "mcp", "telemetry", "charging", "ev", "data-portal"],
+  "privacy_policies": [
+    "https://github.com/nicolaskheirallah/polestar-mcp/blob/master/docs/privacy.md"
+  ],
+  "compatibility": {
+    "platforms": ["darwin", "win32"],
+    "runtimes": {
+      "node": ">=20.11.0"
+    }
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/build/server.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/build/server.js"],
+      "env": {
+        "POLESTAR_CLIENT_ID": "${user_config.client_id}",
+        "POLESTAR_CLIENT_SECRET": "${user_config.client_secret}",
+        "POLESTAR_ACCOUNT_ID": "${user_config.account_id}",
+        "POLESTAR_ALLOW_LOCATION": "${user_config.allow_location}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "prompts_generated": true,
+  "user_config": {
+    "client_id": {
+      "type": "string",
+      "title": "OAuth client ID",
+      "description": "The client ID from the Polestar Data Portal API tab.",
+      "required": true
+    },
+    "client_secret": {
+      "type": "string",
+      "title": "OAuth client secret",
+      "description": "The client secret shown once when the credential was created.",
+      "sensitive": true,
+      "required": true
+    },
+    "account_id": {
+      "type": "string",
+      "title": "Account ID",
+      "description": "The Account ID from the Data Portal, sent as x-client-id. It is not the OAuth client ID.",
+      "required": true
+    },
+    "allow_location": {
+      "type": "boolean",
+      "title": "Allow location reads",
+      "description": "Turn off to never request or return vehicle position.",
+      "default": true,
+      "required": false
+    }
+  }
+}

@@ -1,8 +1,28 @@
 import { z } from 'zod';
-import { activeWarnings, distance, formatAge, humanizeEnum, km, observedAtMs, pct } from './format.js';
-import { ampLimitA, availabilityView, batteryView, exteriorView, healthView, odometerMeters, targetSoc } from './domain-data.js';
+import {
+  activeWarnings,
+  distance,
+  formatAge,
+  humanizeEnum,
+  km,
+  maskVin,
+  observedAtMs,
+  pct,
+  summarizeDomain,
+} from './format.js';
+import {
+  ampLimitA,
+  availabilityView,
+  batteryView,
+  chargeWindow,
+  exteriorView,
+  healthView,
+  odometerMeters,
+  pendingAmpLimitA,
+  targetSoc,
+} from './domain-data.js';
 import { chargeModel } from './charge-model.js';
-import { delegatedAccountArg, errorResult, text, vinArg, type ToolDeps, type VinArgs } from './tool-output.js';
+import { delegatedAccountArg, errorResult, vinArg, withData, type ToolData, type ToolDeps, type VinArgs } from './tool-output.js';
 import { noData, readDomains, unknownData, vehicleFor, type DomainTarget } from './vehicle-read.js';
 import type { ToolSpec } from './tools.js';
 
@@ -33,6 +53,112 @@ const STATUS_DOMAINS: readonly DomainTarget[] = Object.values(STATUS_READS);
 
 const EXTERIOR_DOMAIN: DomainTarget = { kind: 'telemetry', name: 'exterior' };
 const HEALTH_DOMAIN: DomainTarget = { kind: 'telemetry', name: 'health' };
+
+/** Seconds of staleness for one payload, when the payload carries a clock. */
+function ageSecondsOf(data: Record<string, unknown> | null, nowMs: number): number | undefined {
+  if (data === null) return undefined;
+  const observed = observedAtMs(data);
+  return observed === undefined ? undefined : Math.max(0, Math.round((nowMs - observed) / 1000));
+}
+
+/** The age a setting line prints, or an explicit unknown rather than "fresh". */
+const observationText = (data: Record<string, unknown>, nowMs: number): string => {
+  const observed = observedAtMs(data);
+  return observed === undefined ? 'freshness unknown' : formatAge(observed, nowMs);
+};
+
+/**
+ * The seven charging settings get_charging_setup reads together. `charge-locations`
+ * and `charge-now` are metadata-only over M2M, and `is-at-charge-location` answers
+ * DATA_NOT_AVAILABLE on the reference car, so naming them is the value they carry.
+ */
+const CHARGING_SETTINGS_READS = {
+  'amp-limit': { kind: 'charging', name: 'amp-limit' },
+  'target-soc': { kind: 'charging', name: 'target-soc' },
+  'global-charge-timer': { kind: 'charging', name: 'global-charge-timer' },
+  'parking-climate-timer': { kind: 'charging', name: 'parking-climate-timer' },
+  'charge-locations': { kind: 'charging', name: 'charge-locations' },
+  'charge-now': { kind: 'charging', name: 'charge-now' },
+  'is-at-charge-location': { kind: 'charging', name: 'is-at-charge-location' },
+} as const;
+
+const asRecordValue = (value: unknown): Record<string, unknown> | undefined =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+
+/** One clock entry of the parking-climate-timer payload. */
+export interface ClimateTimerEntry {
+  activated?: boolean | undefined;
+  hour?: number | undefined;
+  weekdays: string[];
+  repeat?: boolean | undefined;
+  offsetMinutes?: number | undefined;
+}
+
+/**
+ * The parking climate timers as typed values. Shape-tolerant on purpose: the
+ * humanizer once threw on a non-array `parkingClimateTimers`, and this reader
+ * must answer [] rather than take a whole aggregate down.
+ *
+ * Exported because get_departure_readiness reads the same list; the seven-setting
+ * aggregate is the tool that owns the charging-setting payload shapes.
+ */
+export function climateTimerEntries(data: Record<string, unknown> | null | undefined): ClimateTimerEntry[] {
+  const timers = asRecordValue(data)?.parkingClimateTimers;
+  if (!Array.isArray(timers)) return [];
+  const entries: ClimateTimerEntry[] = [];
+  for (const item of timers) {
+    const record = asRecordValue(item);
+    if (record === undefined) continue;
+    const readyAt = asRecordValue(record.readyAt);
+    const zone = asRecordValue(readyAt?.timeZone);
+    const hour = typeof readyAt?.hour === 'number' && Number.isFinite(readyAt.hour) ? readyAt.hour : undefined;
+    const offsetMinutes = typeof zone?.offsetMinutes === 'number' && Number.isFinite(zone.offsetMinutes) ? zone.offsetMinutes : undefined;
+    const weekdays = Array.isArray(record.weekdays)
+      ? record.weekdays.filter((day): day is string => typeof day === 'string')
+      : [];
+    entries.push({
+      ...(hour !== undefined ? { hour } : {}),
+      ...(offsetMinutes !== undefined ? { offsetMinutes } : {}),
+      ...(typeof record.activated === 'boolean' ? { activated: record.activated } : {}),
+      ...(typeof record.repeat === 'boolean' ? { repeat: record.repeat } : {}),
+      weekdays,
+    });
+  }
+  return entries;
+}
+
+/** The typed values of one charging setting, for the structured `data` payload. */
+function chargingSettingData(name: string, data: Record<string, unknown>, nowMs: number): ToolData {
+  const ageSeconds = ageSecondsOf(data, nowMs);
+  const out: ToolData = { reported: true, ...(ageSeconds !== undefined ? { ageSeconds } : {}) };
+  if (name === 'amp-limit') {
+    out.ampLimitA = ampLimitA(data) ?? null;
+    out.pendingAmpLimitA = pendingAmpLimitA(data) ?? null;
+  } else if (name === 'target-soc') {
+    const target = targetSoc(data);
+    out.targetPct = target.levelPct ?? null;
+    out.settingType = target.settingType ?? null;
+  } else if (name === 'global-charge-timer') {
+    const window = chargeWindow(data);
+    out.window = window === undefined
+      ? null
+      : {
+          activated: window.activated ?? null,
+          startHour: window.startHour ?? null,
+          stopHour: window.stopHour ?? null,
+          offsetMinutes: window.offsetMinutes ?? null,
+        };
+  } else if (name === 'parking-climate-timer') {
+    out.timers = climateTimerEntries(data);
+  } else if (name === 'charge-locations') {
+    out.note = 'Over M2M this is a settings record; no charge-location list is returned.';
+  } else if (name === 'charge-now') {
+    out.note = 'Over M2M this carries only the last sync timestamp; not an active or inactive state.';
+  } else if (name === 'is-at-charge-location') {
+    out.atChargeLocation = data.isAtChargeLocation ?? null;
+  }
+  return out;
+}
 
 const minutesToHours = (minutes: number): string => `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 
@@ -65,28 +191,49 @@ export function aggregateToolSpecs(deps: ToolDeps): ToolSpec[] {
         const nowMs = deps.nowMs?.() ?? Date.now();
 
         const lines: string[] = [`Car status, ${found.vehicle.label}`];
+        const data: ToolData = {};
         if (battery) {
           const seen = batteryView(battery);
           lines.push(
             `• Battery: ${pct(seen.chargeLevelPct)} · ${distance(seen.distanceToEmptyKm, deps.units)} range · ${humanizeEnum(seen.status)} · ${humanizeEnum(seen.connection)}`,
           );
+          data.battery = {
+            chargePct: seen.chargeLevelPct ?? null,
+            rangeKm: seen.distanceToEmptyKm ?? null,
+            chargingStatus: humanizeEnum(seen.status),
+            connection: humanizeEnum(seen.connection),
+            timeToFullMinutes: seen.timeToFullMinutes ?? null,
+          };
         }
         if (exterior) {
           const seen = exteriorView(exterior);
           const lock = seen.lockState === 'locked' ? 'locked' : seen.lockState === 'unlocked' ? 'not fully locked' : 'lock state not reported';
           lines.push(`• Exterior: ${seen.open.length === 0 ? 'everything closed' : `${seen.open.length} item(s) open`} · ${lock} · alarm ${humanizeEnum(seen.alarm).toLowerCase()}`);
+          data.exterior = {
+            openItems: seen.open,
+            lockState: seen.lockState,
+            alarmState: seen.alarmState,
+            alarm: humanizeEnum(seen.alarm),
+          };
         }
         if (availability) {
           const seen = availabilityView(availability);
           lines.push(`• Car is ${humanizeEnum(seen.status).toLowerCase()} (${humanizeEnum(seen.usageMode)})`);
+          data.availability = { status: humanizeEnum(seen.status), usageMode: humanizeEnum(seen.usageMode) };
         }
         if (odometer) {
           lines.push(`• Odometer: ${km(odometerMeters(odometer), deps.units)}`);
+          data.odometerMeters = odometerMeters(odometer) ?? null;
         }
         if (health) {
           const seen = healthView(health);
           const warnings = activeWarnings(health);
           lines.push(`• Service: in ${seen.daysToService ?? 'n/a'} days / ${distance(seen.distanceToServiceKm, deps.units)} · ${warnings.length === 0 ? 'no warnings' : `warnings: ${warnings.join(', ')}`}`);
+          data.health = {
+            daysToService: seen.daysToService ?? null,
+            distanceToServiceKm: seen.distanceToServiceKm ?? null,
+            warnings,
+          };
         }
 
         // The charging answer: plugged or not, what level the car is set to, and
@@ -126,6 +273,17 @@ export function aggregateToolSpecs(deps: ToolDeps): ToolSpec[] {
           } else {
             lines.push("• Car's own time to full: not reported by the car");
           }
+          data.charging = {
+            targetPct: reportedTarget ?? null,
+            targetReported: reportedTarget !== undefined,
+            energyNeededKwh: model.energyNeededKwh ?? null,
+            gridEnergyKwh: model.gridEnergyKwh ?? null,
+            capacityKwh: model.capacityKwh ?? null,
+            capacitySource: model.capacitySource ?? null,
+            efficiency: model.efficiency,
+            carTimeToFullMinutes: eta ?? null,
+            problems: model.problems,
+          };
         }
 
         const reportedDomains = [
@@ -154,7 +312,11 @@ export function aggregateToolSpecs(deps: ToolDeps): ToolSpec[] {
         if (unreported.length > 0) {
           lines.push(`Not reported: ${unreported.join(', ')} (the API returned DATA_NOT_AVAILABLE; absence is not a negative).`);
         }
-        return text(lines.join('\n'));
+        data.agesSeconds = Object.fromEntries(
+          ages.map((entry) => [entry.name, Math.max(0, Math.round((nowMs - entry.observed) / 1000))]),
+        );
+        data.unreported = unreported;
+        return withData(lines.join('\n'), data, { vin: maskVin(found.vehicle.vin, deps.redactVin) });
       } catch (err) {
         return errorResult(err);
       }
@@ -186,16 +348,30 @@ export function aggregateToolSpecs(deps: ToolDeps): ToolSpec[] {
         if (seen.lockState === 'unknown') unknown.push(`${seen.unknownLocks.join(' and ')} not reported`);
         if (seen.alarmState === 'unknown') unknown.push('alarm state not reported');
 
+        const secureData = (secure: boolean | null): ToolData => ({
+          secure,
+          lockState: seen.lockState,
+          centralLock: humanizeEnum(seen.centralLock),
+          tailgateLock: humanizeEnum(seen.tailgateLock),
+          alarmState: seen.alarmState,
+          alarm: humanizeEnum(seen.alarm),
+          openSecurityRelevant: open,
+          unknownLocks: seen.unknownLocks,
+          unlockedLocks: seen.unlockedLocks,
+        });
+        const vin = maskVin(found.vehicle.vin, deps.redactVin);
         if (knownProblems.length > 0) {
           const unknownSuffix = unknown.length > 0 ? ` Also unknown: ${unknown.join('; ')}.` : '';
-          return text(`No, car is not secure: ${knownProblems.join('; ')}.${unknownSuffix}`);
+          return withData(`No, car is not secure: ${knownProblems.join('; ')}.${unknownSuffix}`, secureData(false), { vin });
         }
         if (unknown.length > 0) {
-          return text(
+          return withData(
             `Unknown, not reported: ${unknown.join('; ')}. What is known: ${open.length === 0 ? 'all doors, windows, hood and tailgate closed' : `open ${open.join(', ')}`}. The answer is not a no.`,
+            secureData(null),
+            { vin },
           );
         }
-        return text(`Yes, car is secure (locked, all closed). Alarm: ${humanizeEnum(seen.alarm).toLowerCase()}.`);
+        return withData(`Yes, car is secure (locked, all closed). Alarm: ${humanizeEnum(seen.alarm).toLowerCase()}.`, secureData(true), { vin });
       } catch (err) {
         return errorResult(err);
       }
@@ -225,7 +401,15 @@ export function aggregateToolSpecs(deps: ToolDeps): ToolSpec[] {
             : `Needs attention: ${warnings.join(', ')}`,
           `Next service in ${seen.daysToService ?? 'n/a'} days or ${distance(seen.distanceToServiceKm, deps.units)} (whichever first).`,
         ];
-        return text(lines.join('\n'));
+        return withData(
+          lines.join('\n'),
+          {
+            warnings,
+            daysToService: seen.daysToService ?? null,
+            distanceToServiceKm: seen.distanceToServiceKm ?? null,
+          },
+          { vin: maskVin(found.vehicle.vin, deps.redactVin) },
+        );
       } catch (err) {
         return errorResult(err);
       }
@@ -275,6 +459,11 @@ export function aggregateToolSpecs(deps: ToolDeps): ToolSpec[] {
         });
 
         const lines: string[] = [];
+        const estimateData: ToolData = {
+          socPct: seen.chargeLevelPct ?? null,
+          targetPct,
+          targetAssumed: reportedTarget === undefined,
+        };
         const eta = seen.timeToFullMinutes;
         const hasCarEstimate = eta !== undefined && eta > 0;
         if (model.problems.length > 0) {
@@ -308,7 +497,97 @@ export function aggregateToolSpecs(deps: ToolDeps): ToolSpec[] {
         }
         const allAssumptions = [...assumptions, ...model.assumptions];
         lines.push(`Assumptions: ${allAssumptions.length > 0 ? allAssumptions.join('; ') : 'none needed'}.`);
-        return text(lines.join('\n'));
+        Object.assign(estimateData, {
+          energyNeededKwh: model.energyNeededKwh ?? null,
+          gridEnergyKwh: model.gridEnergyKwh ?? null,
+          capacityKwh: model.capacityKwh ?? null,
+          capacitySource: model.capacitySource ?? null,
+          powerKw: model.powerKw ?? null,
+          minutesToTarget: model.energyNeededKwh !== undefined && model.powerKw !== undefined
+            ? Math.round((model.energyNeededKwh / model.powerKw) * 60)
+            : null,
+          carTimeToFullMinutes: eta ?? null,
+          assumptions: allAssumptions,
+          missing: model.missing,
+          problems: model.problems,
+        });
+        return withData(lines.join('\n'), estimateData, { vin: maskVin(found.vehicle.vin, deps.redactVin) });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  },
+
+  {
+    name: 'get_charging_setup',
+    title: 'Get charging setup',
+    description:
+        'One cached call over the seven charging settings: AC amp limit, target charge level, global charge window, parking climate timers, saved charge locations, charge-now override, and whether the car is at a saved charge location. Each reported setting carries its data age; an is-at-charge-location DATA_NOT_AVAILABLE is reported as unsupported on this vehicle (normal), and any other unreported setting is named rather than omitted.',
+    args: { ...vinArg, ...delegatedAccountArg },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    run: async (args: VinArgs, ctx) => {
+      try {
+        const found = await vehicleFor(deps, ctx, args ?? {}, 'pick-vehicle-charging-setup');
+        if (!found.ok) return found.result;
+        const payloads = await readDomains(found.vehicle, CHARGING_SETTINGS_READS);
+        const nowMs = deps.nowMs?.() ?? Date.now();
+        const names = Object.keys(CHARGING_SETTINGS_READS) as (keyof typeof CHARGING_SETTINGS_READS)[];
+
+        const lines: string[] = [`Charging setup, ${found.vehicle.label}`];
+        const settings: ToolData = {};
+        const unreported: string[] = [];
+        const unsupported: string[] = [];
+        for (const name of names) {
+          const data = payloads[name];
+          if (data === null) {
+            if (name === 'is-at-charge-location') {
+              unsupported.push(name);
+              lines.push(`• ${name}: unsupported on this vehicle (the API returned DATA_NOT_AVAILABLE); this is not a failure, the car just does not report at-charge-location state`);
+              settings[name] = { supported: false, reported: false, note: 'DATA_NOT_AVAILABLE; unsupported on this vehicle, not a failure' };
+            } else {
+              unreported.push(name);
+              lines.push(`• ${name}: not reported (the API returned DATA_NOT_AVAILABLE)`);
+              settings[name] = { reported: false };
+            }
+            continue;
+          }
+          let summary: string[];
+          try {
+            summary = summarizeDomain(name, data, deps.units) ?? [];
+          } catch {
+            // One malformed payload shape must not take the whole setup answer
+            // down; the typed readers below stay tolerant, and the per-domain
+            // tool remains the raw view.
+            summary = ['summary unavailable for this payload shape; read the raw payload from the per-domain tool'];
+          }
+          lines.push(`• ${name} (${observationText(data, nowMs)}): ${summary.join(' / ')}`);
+          settings[name] = chargingSettingData(name, data, nowMs);
+        }
+        if (unsupported.length > 0) {
+          lines.push(`Unsupported here (not a failure): ${unsupported.join(', ')}.`);
+        }
+        if (unreported.length > 0) {
+          lines.push(`Not reported: ${unreported.join(', ')} (absence is not a negative).`);
+        }
+        const oldest = names
+          .flatMap((name) => {
+            const data = payloads[name];
+            if (data === null) return [];
+            const observed = observedAtMs(data);
+            return observed === undefined ? [] : [{ name, observed }];
+          })
+          .reduce<{ name: string; observed: number } | undefined>(
+            (current, entry) => (current === undefined || entry.observed < current.observed ? entry : current),
+            undefined,
+          );
+        if (oldest !== undefined) lines.push(`Oldest setting: ${oldest.name} (${formatAge(oldest.observed, nowMs)}).`);
+
+        return withData(lines.join('\n'), {
+          settings,
+          unsupported,
+          unreported,
+          ...(oldest !== undefined ? { oldestSetting: oldest.name } : {}),
+        }, { vin: maskVin(found.vehicle.vin, deps.redactVin) });
       } catch (err) {
         return errorResult(err);
       }

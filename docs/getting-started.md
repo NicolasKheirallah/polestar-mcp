@@ -93,6 +93,7 @@ The server knows exactly which `POLESTAR_*` variables exist. When you set one it
 | `POLESTAR_TIMEOUT_MS` | 15000 | Hard deadline per HTTP request |
 | `POLESTAR_BUDGET` | 10000 | Daily live-call ceiling. The server fails closed at the limit |
 | `POLESTAR_BUDGET_PER_MINUTE` | no | Rolling per-minute ceiling the API also publishes (100 req/min). Waits it out rather than failing; `100` default |
+| `POLESTAR_BUDGET_LEDGER` | unset | Absolute path to a JSON file for the daily call count, so restarts and extra processes share one allowance. Unset keeps it in memory |
 | `POLESTAR_CACHE` | on | `off` (or `disabled`, `0`, `false`) disables the response cache |
 | `POLESTAR_SCOPES` | all domain scopes | Space- or comma-separated scope override for the token request |
 | `POLESTAR_HISTORY_DIR` | unset | Enable the local history store and background sampler in this directory |
