@@ -2,7 +2,7 @@
 
 # polestar-mcp
 
-**Ask your Polestar questions in plain language. Get answers from what the car reports.**
+Read-only MCP server for the Polestar Data Portal M2M API.
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for the [Polestar Data Portal M2M API](https://data-portal.polestar.com), built for any MCP client: Claude Desktop, ZCode, Cursor, or your own tooling.
 
@@ -14,61 +14,61 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for the [Pole
 
 </div>
 
-Ask "how is my car doing?" and the assistant calls one tool, reads one cached answer, and tells you the charge level, the range, whether everything is locked, and how old each number is. Ask "when will it be charged?" or "plan the cheapest charging for tonight" and it estimates or plans from the car's own configuration.
+## What it does
 
-The API only answers "what is true right now". With the optional local history store switched on, the same server also answers what the API cannot: how the battery has aged, what each charging session cost, which trips the odometer implies, which warnings appeared or cleared, and a weekly digest of the car's week.
+polestar-mcp connects an MCP client to the Polestar Data Portal, so you can ask about your car in plain language and get answers from the data the car reports. "How is my car doing?" becomes one tool call and one short briefing: charge, range, locks, availability, odometer, service countdown, and the age of each value.
 
-Every answer is a read. Polestar's documented v1 API publishes no write endpoints, so there is nothing here that can lock your car, start the climate, or change a charge limit. Every tool carries the MCP `readOnlyHint`, so clients can auto-approve it.
+The API is read-only, and so is this server. Every tool is a GET, and Polestar's documented v1 API publishes no write endpoints, so nothing here can lock the car, start the climate, or change a charge limit. Every tool carries `readOnlyHint: true`, so MCP clients can auto-approve calls.
 
-> [!IMPORTANT]
-> Setup has exactly one trap: the Data Portal gives you two identifiers and the API needs both. The OAuth **client ID** authenticates the token request; the **Account ID** (labeled `x-client-id` on the portal page) identifies you on every vehicle request. Sending the client ID as the Account ID fails every call with `403 AUTHZ_CLIENT_ID_MISMATCH`. The server checks for this at startup and warns you.
+A default start registers 26 tools. Enable the optional local history store and it registers 36. The extra ten answer questions the API cannot, such as how the battery has aged, what a charging session cost, which trips the odometer implies, and what changed this week.
 
-## What you can ask
+## Contents
 
-| You ask | The assistant calls | You get |
-| --- | --- | --- |
-| "How is my car doing?" | `get_car_status` | One briefing: charge, range, locks, availability, odometer, service countdown, data ages |
-| "Is everything locked?" | `is_car_secure` | A yes/no verdict that names anything open |
-| "Does anything need attention?" | `get_needs_attention` | Active warnings only, plus the service countdown |
-| "When will it be charged?" | `get_charging_estimate` | Energy and time to target, with every assumption stated |
-| "Plan the cheapest charging tonight" | `plan_cheapest_charge` | A schedule of hours, given a spot-price curve you paste in |
-| "Where is the car?" | `get_location` | Last known position with heading, speed, and data age |
-| "How has the battery aged?" | `get_degradation_report` | Capacity and range trends (needs history, see below) |
-| "What is my charging setup?" | `get_charging_setup` | The seven charging settings in one answer, each with its age |
-| "Will the car be ready by Sunday at 14:00?" | `get_departure_readiness` | A yes or no with the charge deadline, or a refusal when the timer cannot support it |
-| "What did charging cost me?" | `get_charging_cost` | Energy, cost and stated assumptions for each recorded charging session (needs history) |
-| "What did I drive this week?" | `get_trips` | Trips rebuilt from odometer history, with gaps and resets named (needs history) |
-| "Catch me up on the week" | `get_weekly_digest` | Distance, charge, warnings and settings changes in one answer (needs history) |
+- [What it does](#what-it-does)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [What you can ask](#what-you-can-ask)
+- [The tools](#the-tools)
+- [Resources, prompts, and subscriptions](#resources-prompts-and-subscriptions)
+- [Rate limits, caching, and tokens](#rate-limits-caching-and-tokens)
+- [History and privacy](#history-and-privacy)
+- [HTTP mode](#http-mode)
+- [Configuration](#configuration)
+- [Development and testing](#development-and-testing)
+- [Security](#security)
+- [Documentation](#documentation)
+- [Project status](#project-status)
+- [License](#license)
 
-Domain tools answer in short prose with the data age in the header, and `raw: true` appends the untouched API payload. A successful result sends that text once plus structured data where a tool has one; `structuredContent.message` is used on failures, not on success.
+## Requirements
 
-```text
-Vehicle My Car: telemetry/battery (data observed 12 min ago)
-Charge: 52% · range 170 km
-Charging: Idle · Unplugged
-Average consumption: 20.1 kWh/100km
-```
+- Node.js 20.11 or newer.
+- An MCP client that can launch a stdio server, such as Claude Desktop, ZCode, Cursor, or your own.
+- A Polestar Data Portal credential: client ID, client secret, and Account ID. The offline demo does not need one.
 
-(Vehicle name and values come from the project's sanitized test fixtures; live answers carry your own labels and numbers.)
+## Quick start
 
-## Quickstart
+### Try it without a car
 
-### 1. Try it offline, no Polestar credential
-
-The repository ships a sanitized captured dump under `test/fixtures/dump`, and the demo asserts real values through the full server, token flow included:
+The repository includes a sanitized capture of API responses under `test/fixtures/dump`. The demo runs the full server against that capture, token flow included:
 
 ```sh
 npm ci
 npm run build
-npm run demo                               # offline demo against the shipped dump, prints DUMP_OK
-POLESTAR_FIXTURES_DIR=test/fixtures/dump npm start   # serve the shipped dump interactively
+npm run demo
 ```
 
-The shipped dump is synthetic and travels with the package, so the demo works after a plain checkout and after an install. A real capture can be replayed by pointing `POLESTAR_FIXTURES_DIR` at it; a dump without a token response fails with `AuthError: Token request failed (HTTP 404)`, because fixture mode runs the real auth lifecycle rather than skipping it. A route with no fixture answers `NOT_FOUND`, deliberately distinct from `DATA_NOT_AVAILABLE`, so a missing fixture can never masquerade as "the car reports nothing".
+`npm run demo` prints `DUMP_OK` when every assertion passes. To browse the same data interactively, start the server in fixture mode:
 
-### 2. Connect your car
+```sh
+POLESTAR_FIXTURES_DIR=test/fixtures/dump npm start
+```
 
-1. Log in at [data-portal.polestar.com](https://data-portal.polestar.com), open the **Data Portal API** tab, and create a credential. Note the **client ID**, the **client secret** (shown once), and the **Account ID** (`x-client-id`) at the top of the page.
+Fixture mode uses the real authentication lifecycle, so a capture without a token response fails with `AuthError: Token request failed (HTTP 404)` rather than skipping auth. A route with no fixture answers `NOT_FOUND`, which is deliberately different from `DATA_NOT_AVAILABLE`: a missing fixture cannot be mistaken for a car that reports nothing.
+
+### Connect your car
+
+1. Log in at [data-portal.polestar.com](https://data-portal.polestar.com), open the Data Portal API tab, and create a credential. Note the client ID, the client secret (shown once), and the Account ID (`x-client-id`) at the top of the page.
 2. Store them outside any repository, in the server's home config:
 
    ```sh
@@ -93,13 +93,49 @@ The shipped dump is synthetic and travels with the package, so the demo works af
    }
    ```
 
-4. Restart the client and ask something.
+4. Restart the client.
 
-Credentials can also ride in the client's `env` block instead of the secrets file; real environment variables always win. The dotenv loader handles `export` prefixes, both quote styles, and trailing comments.
+One detail trips people up: the portal gives you two identifiers. The client ID authenticates the token request; the Account ID identifies you on every vehicle request. Using the client ID as the Account ID makes every call fail with `403 AUTHZ_CLIENT_ID_MISMATCH`. The server checks for this at startup and warns you.
+
+Credentials can also ride in the client's `env` block instead of the secrets file. Real environment variables always win, and the dotenv loader handles `export` prefixes, both quote styles, and trailing comments.
+
+### Check the connection
+
+Ask the client for a status briefing. `get_car_status` is a good end-to-end check because it reads several domains and reports their ages. If something looks wrong, `polestar_status` shows the daily budget, cache state, and token expiry.
+
+## What you can ask
+
+| You ask | The assistant calls | You get |
+| --- | --- | --- |
+| "How is my car doing?" | `get_car_status` | One briefing: charge, range, locks, availability, odometer, service countdown, data ages |
+| "Is everything locked?" | `is_car_secure` | A yes/no verdict that names anything open |
+| "Does anything need attention?" | `get_needs_attention` | Active warnings only, plus the service countdown |
+| "When will it be charged?" | `get_charging_estimate` | Energy and time to target, with every assumption stated |
+| "Plan the cheapest charging tonight" | `plan_cheapest_charge` | A schedule of hours, given a spot-price curve you paste in |
+| "Where is the car?" | `get_location` | Last known position with heading, speed, and data age |
+| "How has the battery aged?" | `get_degradation_report` | Capacity and range trends (needs history, see below) |
+| "What is my charging setup?" | `get_charging_setup` | The seven charging settings in one answer, each with its age |
+| "Will the car be ready by Sunday at 14:00?" | `get_departure_readiness` | A yes or no with the charge deadline, or a refusal when the timer cannot support it |
+| "What did charging cost me?" | `get_charging_cost` | Energy, cost and stated assumptions for each recorded charging session (needs history) |
+| "What did I drive this week?" | `get_trips` | Trips rebuilt from odometer history, with gaps and resets named (needs history) |
+| "Catch me up on the week" | `get_weekly_digest` | Distance, charge, warnings and settings changes in one answer (needs history) |
+
+Domain tools answer in short prose. The header names the vehicle and domain and says how old the data is. Passing `raw: true` appends the untouched API payload. A successful result carries that text plus structured data where the tool has one; failures, not successes, use `structuredContent.message`.
+
+```text
+Vehicle My Car: telemetry/battery (data observed 12 min ago)
+Charge: 52% · range 170 km
+Charging: Idle · Unplugged
+Average consumption: 20.1 kWh/100km
+```
+
+The example uses the project's sanitized fixtures. A live answer carries your own labels and numbers.
 
 ## The tools
 
-Naming is mechanical: API domain `target-soc` becomes tool `get_target_soc`. Every tool that reads a car takes an optional `vin`; omit it on a single-vehicle credential and that car is used, and with several cars the tool asks which one (MCP elicitation) and validates the answer before sending it. Argument names are strict: an unknown or misspelled argument is refused by name instead of being dropped. Third-party credentials may pass a `delegated_account_id` argument, checked against the operator's allowlist because the API silently accepts unknown delegated IDs.
+Tool names follow the API domain names: `target-soc` becomes `get_target_soc`. Every tool that reads a car takes an optional `vin`. Omit it when the credential sees one vehicle; with several, the server asks which car through MCP elicitation and checks the answer before sending the request.
+
+Argument names are strict. A misspelled `vin` is refused by name instead of quietly reading the default car. Third-party credentials can pass `delegated_account_id`, which is checked against the operator's allowlist because the API accepts unknown delegated IDs without complaint.
 
 | Tool | What it answers |
 | --- | --- |
@@ -146,22 +182,23 @@ Naming is mechanical: API domain `target-soc` becomes tool `get_target_soc`. Eve
 | `get_timeline` | Cross-domain timeline of what changed, over a window of hours |
 | `get_weekly_digest` | One seven-day digest: distance, charge, warnings, settings |
 
-The fifteen `get_*` domain tools map one-to-one onto the API's fifteen read domains (eight telemetry, seven charging). `list_vehicle_domains` answers the car-level question of which of those domains this vehicle reports. The endpoint and OAuth scope for every Domain are printed by `list_domains`; the full mapping, scopes, and worked examples are in [docs/tools-reference.md](docs/tools-reference.md).
+The 15 `get_*` domain tools map one-to-one onto the API's 15 read domains: eight telemetry, seven charging. `list_vehicle_domains` answers the car-level question of which domains this vehicle reports. `list_domains` prints the endpoint and OAuth scope for every domain; the full mapping, scopes, and worked examples are in [docs/tools-reference.md](docs/tools-reference.md).
 
 ## Resources, prompts, and subscriptions
 
-- **Resources**: `polestar://vehicle/{vin}/{telemetry|charging}/{domain}`, listed from your credential's vehicles, with VIN and domain completions. Reading one returns the same humanized view as the matching tool.
-- **Subscriptions**: subscribe to a resource and the server re-reads it once a minute through the cache, notifying the client only when the cloud's `metaEventId` changed, which happens only when the car reported something new. Subscriptions pause rather than spend the last 10% of the daily budget. (stdio only.)
-- **Prompts**: two ready-made conversations on a default start, `car-status` and `charge-plan`, plus `battery-health-report` when the history store is enabled; each wires common questions to the right tool sequence.
-- **Annotations**: every read carries `readOnlyHint: true`; nothing mutates, so clients can skip confirmation prompts.
+Resources are exposed at `polestar://vehicle/{vin}/{telemetry|charging}/{domain}`. The list comes from the vehicles your credential can see, and the VIN and domain arguments support completions. Reading a resource returns the same humanized view as the matching tool.
 
-## How the 10,000-calls-per-day budget is handled
+Subscriptions are available over stdio. The server re-reads a subscribed resource once a minute through the cache and notifies the client only when the cloud's `metaEventId` changes, which happens when the car reports something new. The poller pauses rather than spending the last 10 percent of the daily budget.
 
-Polestar's M2M credential allows 10,000 calls per client per day, roughly seven per minute sustained. The server treats that as the resource it is:
+Two prompts are registered on a default start, `car-status` and `charge-plan`. `battery-health-report` joins when the history store is enabled. Each wires a common question to the right tool sequence. Nothing mutates, so clients can skip confirmation prompts.
+
+## Rate limits, caching, and tokens
+
+Polestar's M2M credential allows 10,000 calls per client per day, about seven per minute sustained. The server treats the daily allowance as a budget.
 
 ```mermaid
 flowchart LR
-    C["MCP client<br/>stdio or HTTP"] --> T["36 read tools<br/>humanized, data age"]
+    C["MCP client<br/>stdio or HTTP"] --> T["26 or 36 read tools<br/>humanized, data age"]
     T --> K["PolestarClient<br/>VIN resolution<br/>identity checks"]
     K --> H["Cache<br/>per-domain TTLs<br/>stale-while-revalidate"]
     H --> R["Retry<br/>429 / 502 / 503<br/>Retry-After"]
@@ -170,33 +207,42 @@ flowchart LR
     H --> S["History store<br/>opt-in JSONL"]
 ```
 
-- **Cache first.** Each URL gets a TTL matched to how fast the value can change: battery, location, and exterior 30 seconds; availability, odometer, and parking climatization 60 seconds; charging settings 5 minutes; health 10 minutes; pre-cleaning 30 minutes; the vehicle list 1 hour. An expired entry serves the last known value immediately (marked stale) while a single-flight refresh runs in the background, so latency never waits on Polestar.
-- **Retry with limits.** 429 responses (honoring `Retry-After` when present) and 502/503 gateway errors are given up to three attempts with capped backoff. Every attempt, retries included, is metered before it goes out.
-- **Fail closed.** When the day's budget is spent, the server refuses further calls with the reset time in the error instead of spending calls it does not have. The counter lives in memory by default; set `POLESTAR_BUDGET_LEDGER` to an absolute path to share it across restarts and processes. `polestar_status` shows exactly where you stand, and the resource poller and history sampler stand down on their own (at 90% and 80% spent respectively) so background features never eat the quota you need for real questions.
-- **Tokens are managed.** One token request covers the union of all domain scopes (trim it with `POLESTAR_SCOPES` for least privilege), tokens are cached until expiry minus a 5-minute skew, concurrent callers share one request, and a 401 triggers exactly one fresh-token retry.
+Caching carries most repeat traffic. Each URL gets a TTL matched to how fast the value changes: 30 seconds for battery, location, and exterior; 60 seconds for availability, odometer, and parking climatization; 5 minutes for charging settings; 10 minutes for health; 30 minutes for pre-cleaning; 1 hour for the vehicle list. When an entry expires, the cached value is served immediately, marked stale, while a single-flight refresh runs in the background.
 
-## History, sampling, and privacy
+Retries are limited. 429 responses (with `Retry-After` when present) and 502/503 gateway errors get up to three attempts with capped backoff. Every attempt is metered before it leaves.
 
-The API answers only "what is true right now", so longitudinal questions need a local memory. Set `POLESTAR_HISTORY_DIR` and every live domain answer lands in an append-only JSONL store, deduplicated by the cloud's `metaEventId` (unchanged snapshots cost a single line). That feeds `get_history`, `get_degradation_report` (implied full-charge range and capacity trends, presented as estimates rather than verdicts), and `get_charging_sessions` (start, duration, peak power, max SoC). Recording is passive: it reuses answers the server already fetched. If you also want the car sampled while nobody is asking, set `POLESTAR_SAMPLE=1`; the background round covers battery, odometer, location, and exterior every 10 minutes by default and stands down at 80% of the budget.
+The budget fails closed. When the daily allowance is gone, further calls are refused with the reset time instead of spending calls beyond the limit. The counter is held in memory by default; `POLESTAR_BUDGET_LEDGER` points it at a JSON file shared across restarts and processes. `polestar_status` reports budget, cache, and token state, and the resource poller and sampler pause automatically at 90 percent and 80 percent of the budget so background work cannot consume the quota you need.
 
-Three dials control what leaves your car and how it is named:
+Tokens are cached. One token request covers the union of all domain scopes (trim it with `POLESTAR_SCOPES` for least privilege), and the token is reused until expiry minus a five-minute skew. Concurrent callers share one request, and a 401 triggers exactly one fresh-token retry.
+
+## History and privacy
+
+The API reports current state only, so questions about the past need a local store. Set `POLESTAR_HISTORY_DIR` and each live domain answer is appended to a JSONL file, deduplicated by `metaEventId`; an unchanged snapshot costs one line. The store feeds `get_history`, the degradation report, charging sessions, and the other history tools. Recording is passive: it reuses answers the server already fetched. To sample while nobody is asking, set `POLESTAR_SAMPLE=1`. The sampler covers battery, odometer, location, and exterior every 10 minutes by default and stops at 80 percent of the budget.
+
+These variables control what leaves the car and how it is named:
 
 | Variable | Effect |
 | --- | --- |
 | `POLESTAR_VEHICLE_LABELS` | `VIN=Friendly Name` pairs, so answers say "My Car" instead of printing identifiers |
 | `POLESTAR_REDACT_VIN=1` | Masks VINs in rendered output (first 3 and last 3 characters). Not with `raw:true`, which returns the payload as sent |
-| `POLESTAR_ALLOW_LOCATION=0` | `get_location` refuses, and coordinates are stripped from aggregates |
+| `POLESTAR_ALLOW_LOCATION=0` | `get_location` refuses, coordinates are stripped from aggregates, and recorded position history is refused |
+
+The store is owner-only: files are created `0600` and per-vehicle directories `0700`. Position history is refused in `get_history` when `POLESTAR_ALLOW_LOCATION=0`, matching every other location surface.
 
 ## HTTP mode
 
-Set `POLESTAR_HTTP_PORT=8420 npm start` and the same engine serves tools, resources, and prompts over stateless Streamable HTTP: each request is independent, while cache, budget, and history are shared. It binds `127.0.0.1` by default; binding any other address requires `POLESTAR_HTTP_TOKEN`, because a server that reads vehicle location must not sit unauthenticated on a shared network. Browser cross-origin requests are refused unless the `Origin` matches the request host or appears in `POLESTAR_HTTP_ALLOWED_ORIGINS`; a forged `Host` is refused the same way. Resources work in both modes. Subscriptions do not: a stateless request's surface is closed as its response ends, so a poller would be stopped before its first tick, and the server answers `resources/subscribe` with an error and advertises `subscribe: false` in the handshake rather than accepting one that can never fire. Use stdio for subscriptions.
+Set `POLESTAR_HTTP_PORT=8420 npm start` and the same engine serves tools, resources, and prompts over stateless Streamable HTTP. Each request is independent, while cache, budget, and history are shared. It binds `127.0.0.1` by default; binding any other address requires `POLESTAR_HTTP_TOKEN`, because a server that reads vehicle location must not sit unauthenticated on a shared network. Browser cross-origin requests are refused unless the `Origin` matches the request host or appears in `POLESTAR_HTTP_ALLOWED_ORIGINS`; a forged `Host` is refused the same way.
 
-Both protocol eras are served from one listener. A 2025-era client gets the stateless legacy path; a `2026-07-28` client gets `server/discover` plus the per-request envelope, with the same 26-tool default surface (36 with history enabled). A modern request missing its envelope is refused by name, never silently downgraded to the legacy path.
+Resources work in both modes. Subscriptions do not: a stateless request's surface is closed as its response ends, so a poller would be stopped before its first tick. The server answers `resources/subscribe` with an error and advertises `subscribe: false` in the handshake instead of accepting a subscription that can never fire. Use stdio for subscriptions.
+
+Both protocol eras are served from one listener. A 2025-era client gets the stateless legacy path; a `2026-07-28` client gets `server/discover` plus the per-request envelope, with the same 26-tool default surface, or 36 with history enabled. A modern request missing its envelope is refused by name, never silently downgraded to the legacy path.
+
+## Configuration
+
+All configuration is environment-only. The server knows which variables it reads and warns about unrecognized ones, suggesting the closest real name; with `POLESTAR_STRICT_ENV=1` a typo is fatal. A value that is present but unusable, such as a bad URL, a non-numeric timeout, or an out-of-range port, fails fast with the fix in the message.
 
 <details>
-<summary><strong>Full configuration reference (29 variables)</strong></summary>
-
-The server knows exactly which variables it reads and warns about unrecognized ones (suggesting the closest real name); with `POLESTAR_STRICT_ENV=1` a typo is fatal instead of a warning. A value that is present but unusable, a bad URL, a non-numeric timeout, an out-of-range port, fails fast with the fix in the message.
+<summary>Full configuration reference (29 variables)</summary>
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -232,7 +278,7 @@ The server knows exactly which variables it reads and warns about unrecognized o
 
 </details>
 
-## Development
+## Development and testing
 
 ```sh
 npm ci
@@ -253,18 +299,18 @@ npm run check-server-json  # MCP Registry metadata shape
 node docs/check-docs.mjs <tools|envvars|links|hygiene>  # documentation gates
 ```
 
-Requires Node 20.11 or newer. The suite covers what is easy to get subtly wrong: token single-flight and expiry skew, envelope unwrapping and identity checks, VIN resolution and delegation, cache TTLs and stale-while-revalidate, retry and budget metering, the charge-window planner (including windows that wrap midnight), history dedup and session reconstruction, and the configuration registry.
+The suite runs on Node 20.11, 22, and 24 in CI. The suite covers the cases that are easy to get wrong in this server: token single-flight and expiry skew, envelope unwrapping and identity checks, VIN resolution and delegation, cache TTLs and stale-while-revalidate, retry and budget metering, the charge-window planner including windows that wrap midnight, history dedup and session reconstruction, and the configuration registry.
 
-Verification is CI, not a claim in this file: every check runs on each push and pull request, and [CONTRIBUTING.md](CONTRIBUTING.md) carries the full table with what each one proves. The architecture is in [docs/architecture.md](docs/architecture.md) and [docs/development.md](docs/development.md); the domain words the code uses are defined in [CONTRIBUTING.md](CONTRIBUTING.md).
+Every check runs on each push and pull request. [CONTRIBUTING.md](CONTRIBUTING.md) carries the table with what each check proves, and describes how to add a domain or a tool. The architecture is in [docs/architecture.md](docs/architecture.md) and [docs/development.md](docs/development.md).
 
 ## Security
 
-The threat model is in [SECURITY.md](SECURITY.md). Credentials live outside the repository (`~/.config/polestar-mcp/.env.secrets`, or `POLESTAR_ENV_FILE`), no `.env`-family file inside the tree is ever acceptable, and `npm run check-secrets` flags JWTs, opaque credential blobs, VIN-shaped identifiers including ones embedded in longer tokens, personal email, phone numbers and precise coordinates in every scanned file. Each detector proves itself on a positive control before a clean scan is allowed to count.
+The threat model is in [SECURITY.md](SECURITY.md). Credentials live outside the repository, at `~/.config/polestar-mcp/.env.secrets` or a path set with `POLESTAR_ENV_FILE`. No `.env`-family file inside the tree is acceptable. `npm run check-secrets` scans every file for JWTs, opaque credential blobs, VIN-shaped identifiers including ones embedded in longer tokens, personal email, phone numbers, and precise coordinates. Each detector proves itself on a positive control before a clean scan counts.
 
 > [!WARNING]
-> Captured dumps are credentials: they contain long-lived refresh tokens and location history. Do not commit them, paste them into issues, or share them casually.
+> Captured dumps are credentials. They contain long-lived refresh tokens and location history. Do not commit them, paste them into issues, or share them casually.
 
-Every API error carries the `requestId` and `timestamp` Polestar support can look up, preserved on the errors this server raises.
+Every API error preserves the `requestId` and `timestamp` Polestar support can look up.
 
 ## Documentation
 
@@ -282,10 +328,14 @@ Every API error carries the `requestId` and `timestamp` Polestar support can loo
 | [Reviewer pack](docs/reviewer-pack.md) | Sample data, the example prompts, the directory checklist and the distribution status |
 | [Claude Desktop bundle](docs/bundle.md) | The `.mcpb` manifest and the owner build checklist; the bundle build is blocked on the CLI and a desktop host |
 
-## Status
+## Project status
 
-The documented v1 API is read-only and this server is read-only with it: every tool carries `readOnlyHint`, and `POLESTAR_ENABLE_WRITES` registers nothing because Polestar publishes no v1 write endpoints. The app-side consumer API (car model details, render images) is deliberately not wired in either. Its GraphQL queries are unpublished and its refresh tokens rotate destructively, so wiring it would mean depending on a contract that can be revoked without notice.
+The documented v1 API is read-only and this server is read-only with it. Polestar publishes no v1 write endpoints, so `POLESTAR_ENABLE_WRITES` registers nothing. The app-side consumer API, which would add car model details and render images, is deliberately not wired in: its GraphQL queries are unpublished and its refresh tokens rotate destructively, so depending on it would mean depending on a contract that can be revoked without notice.
 
-Distribution status: the npm package and the MCP Registry entry are prepared in this tree (the release workflow checks, packs and publishes on a version tag), but they are not published yet. Publishing is blocked on the owner's npm credentials and on npm name availability. The Claude Desktop `.mcpb` metadata exists in `mcpb/manifest.json`, but the bundle build is blocked on the `mcpb` CLI and a desktop host to test it. Until those land, run the server from a clone with `npm ci && npm run build`. Directory reviewers should start with [docs/reviewer-pack.md](docs/reviewer-pack.md); data handling is described in [docs/privacy.md](docs/privacy.md).
+The npm package and MCP Registry entry are prepared in this tree, and the release workflow checks, packs, and publishes on a version tag, but neither is published yet. Publishing is blocked on the owner's npm credentials and on npm name availability. The Claude Desktop `.mcpb` metadata exists in `mcpb/manifest.json`; building the bundle is blocked on the `mcpb` CLI and a desktop host to test it. Until those land, run the server from a clone with `npm ci && npm run build`. Directory reviewers should start with [docs/reviewer-pack.md](docs/reviewer-pack.md); data handling is described in [docs/privacy.md](docs/privacy.md).
 
-This is a personal project for one owner's Polestar 2. It is not affiliated with or endorsed by Polestar.
+polestar-mcp is a personal project for one owner's Polestar 2. It is not affiliated with or endorsed by Polestar.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
