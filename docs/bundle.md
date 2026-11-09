@@ -34,7 +34,7 @@ manifest is [mcpb/manifest.json](../mcpb/manifest.json).
    and the entry point). Keep the artifact out of the repository.
 6. Install the `.mcpb` in Claude Desktop on macOS and on Windows. Check that the three
    credential fields appear, that the secret field is masked and stored by the host, and that
-   `car-status`, `charge-plan` and `battery-health-report` appear as prompts.
+   `car-status` and `charge-plan` appear as prompts, plus `battery-health-report` when the history store is enabled.
 7. Run one live read (`get_car_status`) with a real credential, then one fixture-only check
    from a checkout with `npm run demo`, so the bundle path and the source path are both
    exercised.

@@ -28,9 +28,9 @@ dump through the full token lifecycle, and both are run in CI. A real capture is
 committed; `npm run capture` writes it outside the project tree, and `npm run check-secrets`
 fails if a live dump appears inside the tree.
 
-## Three example prompts
+## Example prompts
 
-The server registers three MCP prompts. They are the three use cases to review:
+The server registers two MCP prompts on a default start, and a third when the history store is enabled. They are the use cases to review:
 
 1. `car-status`: "Give me a status briefing for my Polestar." It routes to `get_car_status`,
    then `is_car_secure`, then `get_needs_attention`, and ends with a two-line summary.
@@ -65,7 +65,7 @@ The full tool list is in [tools-reference.md](tools-reference.md); the machine r
 | Graceful errors with actionable feedback | `src/failure.ts` and the hint table in `src/tool-output.ts`; every minted code has advice and a test |
 | Frugal token use | results are short prose plus structured data; `tools/list` is checked against a budget in `test/`; there is no always-on sampling |
 | Sample data and a no-credential trial | the synthetic dump plus `npm run demo`, both above |
-| At least three working example prompts | the three MCP prompts above |
+| At least two working example prompts (three with history) | the MCP prompts above |
 | Privacy disclosure | [privacy.md](privacy.md), linked from the README and carried as `privacy_policies` in the bundle manifest |
 | No affiliation claim | the README status section states this is a personal project, not affiliated with or endorsed by Polestar |
 

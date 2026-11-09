@@ -152,7 +152,7 @@ The fifteen `get_*` domain tools map one-to-one onto the API's fifteen read doma
 
 - **Resources**: `polestar://vehicle/{vin}/{telemetry|charging}/{domain}`, listed from your credential's vehicles, with VIN and domain completions. Reading one returns the same humanized view as the matching tool.
 - **Subscriptions**: subscribe to a resource and the server re-reads it once a minute through the cache, notifying the client only when the cloud's `metaEventId` changed, which happens only when the car reported something new. Subscriptions pause rather than spend the last 10% of the daily budget. (stdio only.)
-- **Prompts**: three ready-made conversations, `car-status`, `charge-plan`, and `battery-health-report`, that wire common questions to the right tool sequence.
+- **Prompts**: two ready-made conversations on a default start, `car-status` and `charge-plan`, plus `battery-health-report` when the history store is enabled; each wires common questions to the right tool sequence.
 - **Annotations**: every read carries `readOnlyHint: true`; nothing mutates, so clients can skip confirmation prompts.
 
 ## How the 10,000-calls-per-day budget is handled
@@ -171,7 +171,7 @@ flowchart LR
 ```
 
 - **Cache first.** Each URL gets a TTL matched to how fast the value can change: battery, location, and exterior 30 seconds; availability, odometer, and parking climatization 60 seconds; charging settings 5 minutes; health 10 minutes; pre-cleaning 30 minutes; the vehicle list 1 hour. An expired entry serves the last known value immediately (marked stale) while a single-flight refresh runs in the background, so latency never waits on Polestar.
-- **Retry with limits.** 429 responses (honoring `Retry-After` when present) and 502/503 gateway errors are retried up to three times with capped backoff. Every attempt, retries included, is metered before it goes out.
+- **Retry with limits.** 429 responses (honoring `Retry-After` when present) and 502/503 gateway errors are given up to three attempts with capped backoff. Every attempt, retries included, is metered before it goes out.
 - **Fail closed.** When the day's budget is spent, the server refuses further calls with the reset time in the error instead of spending calls it does not have. The counter lives in memory by default; set `POLESTAR_BUDGET_LEDGER` to an absolute path to share it across restarts and processes. `polestar_status` shows exactly where you stand, and the resource poller and history sampler stand down on their own (at 90% and 80% spent respectively) so background features never eat the quota you need for real questions.
 - **Tokens are managed.** One token request covers the union of all domain scopes (trim it with `POLESTAR_SCOPES` for least privilege), tokens are cached until expiry minus a 5-minute skew, concurrent callers share one request, and a 401 triggers exactly one fresh-token retry.
 
@@ -279,7 +279,7 @@ Every API error carries the `requestId` and `timestamp` Polestar support can loo
 | [Consumer API adapter note](docs/consumer-adapter-note.md) | Why the consumer app API stays unwired, and the shape when it lands |
 | [Write endpoints](docs/write-endpoints.md) | The designed but dormant write surface and its safety rules |
 | [Privacy policy](docs/privacy.md) | What is processed, where it goes, what stays local, and the owner's controls |
-| [Reviewer pack](docs/reviewer-pack.md) | Sample data, the three example prompts, the directory checklist and the distribution status |
+| [Reviewer pack](docs/reviewer-pack.md) | Sample data, the example prompts, the directory checklist and the distribution status |
 | [Claude Desktop bundle](docs/bundle.md) | The `.mcpb` manifest and the owner build checklist; the bundle build is blocked on the CLI and a desktop host |
 
 ## Status

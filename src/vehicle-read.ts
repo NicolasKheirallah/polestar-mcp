@@ -190,9 +190,11 @@ export async function vehicleFor(
  * consequence is worth naming adds it as a second sentence; the fact itself is
  * stated here, in the wording docs/tools-reference.md documents.
  *
- * Absence is a successful answer, but it is not data: the envelope carries
+ * Absence is a successful answer, but it is not data: this envelope carries
  * `data.reported: false` and the `DATA_NOT_AVAILABLE` code so a structured consumer
- * can tell "the car reports nothing" from a value.
+ * can tell "the car reports nothing" from a value. The domain-tool path renders only
+ * the sentence through `noData` and rebuilds its own envelope, so it reports
+ * `data.reported: false` without the code; the aggregate tools keep both.
  */
 export function noData(vehicle: VehicleScope, domain: DomainTarget, consequence?: string): ToolResult {
   const sentence = `No ${domain.name} data is available for vehicle ${vehicle.label} (the API returned DATA_NOT_AVAILABLE, this vehicle does not report this domain).`;

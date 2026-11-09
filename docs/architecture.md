@@ -4,7 +4,7 @@ Who this is for: developers who want to change the server, review it, or underst
 
 ## The mental model in one paragraph
 
-One deep module, `PolestarClient`, knows everything about talking to Polestar: how to resolve which car a call means, how to get and cache a token, which headers to send, how responses are wrapped, how errors are shaped, and what "this car reports nothing here" means. A transport chain under it keeps the 10,000-calls-per-day budget honest: a cache serves repeats locally, a retry wrapper handles the API's transient failures, and every live attempt is metered before it goes out. On top sit table-driven domain tools, four aggregate tools and one advisor that reuse the same data, an opt-in history store that turns the stateless API into a memory, and a humanizer that renders domain reads in short prose. The whole surface is available over stdio or stateless Streamable HTTP from the same engine.
+One deep module, `PolestarClient`, knows everything about talking to Polestar: how to resolve which car a call means, how to get and cache a token, which headers to send, how responses are wrapped, how errors are shaped, and what "this car reports nothing here" means. A transport chain under it keeps the 10,000-calls-per-day budget honest: a cache serves repeats locally, a retry wrapper handles the API's transient failures, and every live attempt is metered before it goes out. On top sit table-driven domain tools, five aggregate tools and two advisors that reuse the same data, an opt-in history store that turns the stateless API into a memory, and a humanizer that renders domain reads in short prose. The whole surface is available over stdio or stateless Streamable HTTP from the same engine.
 
 ```
 MCP client (stdio)         HTTP client (Streamable HTTP, stateless)
@@ -15,10 +15,10 @@ MCP client (stdio)         HTTP client (Streamable HTTP, stateless)
 | server.ts   config -> engine -> MCP surface                  |
 |             engine: budget, history store, sampler, stats    |
 |                                                              |
-| tools:  domain reads (15) + listings (2)  aggregates (4)     |
-|         advisor (1)  system (1)       history (3, opt-in)    |
+| tools:  domain reads (15) + listings (3)  aggregates (5)     |
+|         advisor (2)  system (1)       history (10, opt-in)   |
 |         resources + completions + metaEventId subscriptions  |
-|         three prompts                                        |
+|         two or three prompts                                 |
 |         tools.ts (one registrar), format.ts (humanizer),     |
 |         domain-data.ts (payloads), charge-model.ts,          |
 |         failure.ts, tool-output.ts (the result envelope),    |
@@ -83,13 +83,13 @@ Keeping that in one module is what lets a tool body be its own prose. It also se
 
 ### `aggregate-tools.ts`, `advisor-tools.ts`, `system-tools.ts`
 
-- The four aggregate tools answer the questions people actually ask in one call, over data the domain tools already serve. They read through the cache, so an aggregate costs at most one live call per constituent domain and usually zero. `get_car_status` reads five domains in parallel; `is_car_secure` turns the exterior domain into a true/false verdict that names anything open; `get_needs_attention` filters the health domain down to active warnings; `get_charging_estimate` combines battery, target, and amp limit, states every assumption it makes, and falls back to the car's own time-to-full estimate when the data for exact math is missing.
+- The five aggregate tools answer the questions people actually ask in one call, over data the domain tools already serve. They read through the cache, so an aggregate costs at most one live call per constituent domain and usually zero. `get_car_status` reads six domains in parallel; `is_car_secure` turns the exterior domain into a true/false verdict that names anything open; `get_needs_attention` filters the health domain down to active warnings; `get_charging_estimate` combines battery, target, and amp limit, states every assumption it makes, and falls back to the car's own time-to-full estimate when the data for exact math is missing.
 - `plan_cheapest_charge` is the read-only smart-charging advisor: the caller supplies hourly prices as an argument, the tool adds the car's SoC, target SoC, amp limit, and charge window from `global-charge-timer`, and `planner.ts` computes the cheapest contiguous hours that reach the target (falling back to cheapest individual hours, and saying so, when the window is too short). No writes, no external fetches.
 - `polestar_status` is the server's self-observation: budget used and remaining with its reset time, cache hit rate, and token expiry. An agent that can see the budget can pace itself instead of tripping the fail-closed guard.
 
 ### `history.ts`, `sampler.ts`, `history-tools.ts`: memory for a stateless API
 
-The API answers only "what is true right now", so any longitudinal question needs a local store. `HistoryStore` is an append-only JSONL file per vehicle and domain, deduplicated by the cloud's `metaEventId`: the cloud re-serves the same ID until the car reports something new, so unchanged snapshots cost a single line. A torn last line (a crash mid-append) is tolerated on read. Recording hooks the client, not the cache: `PolestarClient` reports each read it has already unwrapped, along with the change id it found in the same envelope, so passive recording never spends an extra call and no module below the client has to know the envelope's shape. `HistorySampler` optionally polls the four fast-moving domains on a timer (default every 10 minutes, clamped 60 to 3600 seconds) and stands down entirely once 80% of the daily budget is spent; it is off unless `POLESTAR_SAMPLE=1`, and it answers `describe()` for `polestar_status` itself rather than having the composition root restate its cadence and its guard. The three history tools ride on top: raw samples, a degradation series (implied full-charge range from range/SoC, implied capacity from usable energy/SoC; samples under 5% SoC are skipped as noise), and reconstructed charging sessions (a maximal run of charging samples, gaps up to 30 minutes allowed).
+The API answers only "what is true right now", so any longitudinal question needs a local store. `HistoryStore` is an append-only JSONL file per vehicle and domain, deduplicated by the cloud's `metaEventId`: the cloud re-serves the same ID until the car reports something new, so unchanged snapshots cost a single line. A torn last line (a crash mid-append) is tolerated on read. Recording hooks the client, not the cache: `PolestarClient` reports each read it has already unwrapped, along with the change id it found in the same envelope, so passive recording never spends an extra call and no module below the client has to know the envelope's shape. `HistorySampler` optionally polls the four fast-moving domains on a timer (default every 10 minutes, clamped 60 to 3600 seconds) and stands down entirely once 80% of the daily budget is spent; it is off unless `POLESTAR_SAMPLE=1`, and it answers `describe()` for `polestar_status` itself rather than having the composition root restate its cadence and its guard. The ten history tools ride on top: raw samples, a degradation series (implied full-charge range from range/SoC, implied capacity from usable energy/SoC; samples under 5% SoC are skipped as noise), reconstructed charging sessions (a maximal run of charging samples, gaps up to 30 minutes allowed), and the cross-domain views built from the same records (trips, timeline, weekly digest, charging cost, warning changes, service forecast, settings history).
 
 ### `client.ts`: the deep module
 

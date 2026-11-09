@@ -104,7 +104,7 @@ Tokens can carry write-flavored scopes such as `pdp-charging/targetSoc` and `pdp
 The API is a bare request/response surface; the server adds the operational discipline a 10,000-calls-per-day credential needs. These behaviors are the server's own, not the API's:
 
 - **Identity assertions.** The envelope labels each response with its VIN and domain, and payloads repeat the VIN. The client refuses a response labelled for a different vehicle or domain (`VIN_MISMATCH`, `DOMAIN_MISMATCH`) rather than presenting one car's telemetry as another's.
-- **Retry with limits.** 429 responses (honoring `Retry-After` when present) and 502/503 gateway errors are retried up to three times with capped exponential backoff; every attempt, including retries, is metered against the daily budget before it goes out.
+- **Retry with limits.** 429 responses (honoring `Retry-After` when present) and 502/503 gateway errors are given up to three attempts with capped exponential backoff; every attempt, including retries, is metered against the daily budget before it goes out.
 - **Caching.** Repeated reads are served locally with a per-domain freshness policy and stale-while-revalidate, so latency never waits on Polestar and the budget is spent only on genuinely new information.
 - **Per-minute ceiling.** A rolling 100/minute window (`POLESTAR_BUDGET_PER_MINUTE`). Because a minute window always frees on its own, the transport waits out the remaining time when that wait still fits the request deadline, and only surfaces `RATE_LIMIT_MINUTE` when it would park the caller too long.
 - **Fail-closed budget.** When the daily allowance is spent, the server refuses to send further calls (with the reset time in the error) instead of hammering an API that will only answer 429.
