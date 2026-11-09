@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
+import { McpServer, ProtocolError, ProtocolErrorCode, ResourceTemplate } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -14,21 +14,23 @@ import { CachingTransport } from './caching-transport.js';
 import { PolestarClient } from './client.js';
 import { collectScopes, DOMAINS } from './domains.js';
 import { createSubscriptionPoller, type SubscriptionDeps, type SubscriptionPoller } from './subscriptions.js';
-import { decideBind, unauthenticatedBody } from './bind.js';
+import { bearerMatches, decideBind, decideHttpRequest, forbiddenBody, unauthenticatedBody, type BindSuccess } from './bind.js';
 import { domainToolSpecs } from './domain-tools.js';
 import { aggregateToolSpecs } from './aggregate-tools.js';
 import { advisorToolSpecs } from './advisor-tools.js';
-import { historyToolSpecs } from './history-tools.js';
+import { historyToolNames, historyToolSpecs } from './history-tools.js';
 import { systemToolSpecs } from './system-tools.js';
 import { registerTools, toolNames, type ToolSpec } from './tools.js';
-import { accountIdLooksLikeClientId, loadConfig, loadEnvFileInto, unknownEnvFatal, unknownEnvVariables, type Config } from './config.js';
+import { accountIdLooksLikeClientId, InvalidConfigError, loadConfig, loadEnvFileInto, unknownEnvFatal, unknownEnvVariables, type Config } from './config.js';
 import { HistorySampler, SAMPLED_DOMAINS } from './sampler.js';
 import { HistoryStore } from './history.js';
 import { readDomain } from './vehicle-read.js';
+import { valueObservedAtMs } from './domain-data.js';
 import { z } from 'zod';
 import { FixtureTransport, HttpTransport, type Transport } from './transport.js';
 import { RetryingTransport } from './retrying-transport.js';
 import { resultText, type ToolDeps } from './tool-output.js';
+import { maskVin, type Units } from './format.js';
 
 const require = createRequire(import.meta.url);
 const PKG_VERSION: string = require('../package.json').version;
@@ -63,6 +65,25 @@ export function buildEngine(env: NodeJS.ProcessEnv): Engine {
     // Protocol owns stdout; everything diagnosable goes to stderr.
     console.error(`[polestar-mcp] ${message}`);
   };
+  // A fixtures path that does not exist used to start and fail one call at a
+  // time with a filesystem error, which reads like a data problem instead of a
+  // configuration one. Fail before anything is served. (A dump missing only its
+  // token response still fails later, as the fixture adapter documents.)
+  if (config.fixturesDir !== undefined) {
+    let isDirectory = false;
+    try {
+      isDirectory = statSync(config.fixturesDir).isDirectory();
+    } catch {
+      isDirectory = false;
+    }
+    if (!isDirectory) {
+      throw new InvalidConfigError(
+        'POLESTAR_FIXTURES_DIR',
+        `${JSON.stringify(config.fixturesDir)} does not exist or is not a directory.`,
+        'Point it at a captured dump directory (for example test/fixtures/dump for the shipped synthetic one), or unset it for live mode.',
+      );
+    }
+  }
   const budget = new BudgetMeter(config.budgetLimit);
   const minute = new MinuteWindowMeter(config.budgetPerMinute);
   const store = config.historyDir ? new HistoryStore(config.historyDir) : undefined;
@@ -71,12 +92,12 @@ export function buildEngine(env: NodeJS.ProcessEnv): Engine {
   const base: Transport = config.fixturesDir
     ? new FixtureTransport(config.fixturesDir)
     : new HttpTransport(config.timeoutMs);
-  // Retry + budget metering are live-API concerns; fixture reads are free.
-  // The cache is in the chain whenever live reads are worth not repeating. It no
-  // longer plays any part in history recording: the recorder watches the client's
-  // unwrapped result instead of the raw body passing through here.
-  const inner: Transport =
-    config.fixturesDir || config.cacheDisabled ? base : new RetryingTransport(base, { budget, minute });
+  // Retry and metering belong to every live attempt, not to the cache flag:
+  // metering used to live inside a wrapper composed only when the cache was on,
+  // so POLESTAR_CACHE=off silently removed the daily guard, the per-minute guard
+  // and every retry. The cache now wraps the retry layer instead of owning it.
+  // Fixture reads stay unmetered and retry-free: they spend no quota.
+  const inner: Transport = config.fixturesDir ? base : new RetryingTransport(base, { budget, minute });
   const cache = new CachingTransport(inner, {
     onRefreshError: ({ url, message }) => {
       // A stale entry that cannot be refreshed is worth a line on stderr even
@@ -98,6 +119,9 @@ export function buildEngine(env: NodeJS.ProcessEnv): Engine {
     baseUrl: config.baseUrl,
     accountId: config.accountId,
     allowLocation: config.allowLocation,
+    // The client raises VIN_MISMATCH and AMBIGUOUS_VIN; a mask that stopped at
+    // the tool text would leave the identifier in the failure path.
+    redactVin: config.redactVin,
     ...(config.delegatedAccountId ? { delegatedAccountId: config.delegatedAccountId } : {}),
     ...(store === undefined
       ? {}
@@ -108,7 +132,11 @@ export function buildEngine(env: NodeJS.ProcessEnv): Engine {
           // recorder sees the payload already unwrapped, with the change id read
           // out of the same Envelope the client just opened.
           onDomainRead: ({ vin, kind, name, data, metaEventId }) => {
-            store.append(vin, kind, name, { observedAt: Date.now(), metaEventId, data });
+            // observedAt is when this process made the read; valueObservedAt is
+            // the car's own clock from the payload, so a fixture captured months
+            // ago is not presented as a sample taken today. Optional: a payload
+            // without a timestamp records only the read clock.
+            store.append(vin, kind, name, { observedAt: Date.now(), valueObservedAt: valueObservedAtMs(data), metaEventId, data });
           },
         }),
   });
@@ -146,6 +174,12 @@ export interface McpSurface {
   server: McpServer;
   /** Every tool this surface registered, which is the list the instructions name. */
   toolNames: readonly string[];
+  /** Every prompt this surface registered; the history prompt exists only with a store. */
+  prompts: readonly PromptSpec[];
+  /** Prompt names, for a caller that only needs to know what answers prompts/list. */
+  promptNames: readonly string[];
+  /** The text the handshake returns. Built from the surface above, never hand-copied. */
+  instructions: string;
   /** How many resource subscriptions this surface is polling for. */
   readonly subscriptions: number;
   /** Subscribe to a resource URI and start polling. The protocol handler calls this. */
@@ -201,18 +235,29 @@ export function createMcpServer(engine: Engine, options: McpSurfaceOptions = {})
     ...(store === undefined ? [] : historyToolSpecs({ ...deps, store })),
   ];
 
+  // The instructions are generated from the surface the process actually
+  // registered: a hand-written copy had drifted and sent agents to a tool that
+  // was never registered, and it promised a requestId on errors that do not
+  // carry one. Built from the same values the registration used.
+  const instructions = buildInstructions({
+    aggregates: aggregates.map((spec) => spec.name),
+    domainCount: DOMAINS.length,
+    budgetLimit: engine.config.budgetLimit,
+    minuteLimit: engine.minute.snapshot().limit,
+    history: store !== undefined,
+    units: engine.config.units,
+    delegated: engine.config.delegatedAccounts.length > 0,
+  });
+  const prompts = promptSpecs({ history: store !== undefined });
+
   const server = new McpServer(
     { name: 'polestar-mcp', version: PKG_VERSION },
     {
-      instructions: [
-        'Polestar Data Portal (M2M) is READ-ONLY: every tool is a GET, no command is sent to the car.',
-        'Start with list_vehicles. On a credential that sees exactly one vehicle the vin argument may be omitted.',
-        'Domain data is reported by the car, not by the API: fields are absent when unreported, and a whole domain can answer DATA_NOT_AVAILABLE. That is normal, not an error.',
-        `Prefer ${aggregates.map((s) => s.name).join(' or ')} over the ${DOMAINS.length} individual domain reads; every live call spends a shared allowance of ${engine.config.budgetLimit.toLocaleString('en-US')} calls/day and ${engine.minute.snapshot().limit}/minute, and polestar_status reports what is left.`,
-        'Every payload carries an age: charging configuration can be days old while telemetry is minutes old, so read the age before treating a value as current.',
-        'Errors come back as structured JSON with a code, httpStatus and requestId. Quote the requestId when reporting a problem.',
-      ].join(' '),
-      capabilities: { resources: { subscribe: subscriptionsAllowed, listChanged: true }, logging: {} },
+      instructions,
+      // Advertise only what a sender exists for: nothing in this process sends
+      // logging or list-changed notifications, and a client that waits for either
+      // waits forever.
+      capabilities: { resources: { subscribe: subscriptionsAllowed } },
     },
   );
 
@@ -237,11 +282,14 @@ export function createMcpServer(engine: Engine, options: McpSurfaceOptions = {})
   });
 
   registerResources(server, engine, deps, subscriptions, subscriptionsAllowed);
-  registerPrompts(server);
+  registerPrompts(server, prompts);
 
   return {
     server,
     toolNames: toolNames(specs),
+    prompts,
+    promptNames: prompts.map((spec) => spec.name),
+    instructions,
     get subscriptions() {
       return subscriptions.size;
     },
@@ -261,6 +309,113 @@ export function createMcpServer(engine: Engine, options: McpSurfaceOptions = {})
 }
 
 const RESOURCE_KINDS = ['telemetry', 'charging'] as const;
+type ResourceKind = (typeof RESOURCE_KINDS)[number];
+
+function domainsOf(kind: ResourceKind): string[] {
+  return DOMAINS.filter((d) => d.kind === kind).map((d) => d.name);
+}
+
+/**
+ * A vehicle's display label in resource text: the configured owner label when
+ * one exists, otherwise the VIN itself, masked when POLESTAR_REDACT_VIN is on.
+ *
+ * The resource URI keeps the raw VIN and is the documented exception. It is not
+ * cosmetic: `resolveVin` feeds the URI's VIN segment back through the client, so
+ * masking the URI would make every listed resource unreadable and unsubscribable,
+ * which is worse than a narrow, stated exception.
+ */
+function resourceLabel(vin: string, deps: ToolDeps): string {
+  const label = deps.vehicleLabels[vin.toUpperCase()];
+  return label !== undefined ? label : maskVin(vin, deps.redactVin);
+}
+
+export interface VehicleResource {
+  uri: string;
+  name: string;
+  description: string;
+  mimeType: string;
+}
+
+type ResourceVariables = Record<string, string | string[] | undefined>;
+
+/**
+ * Every Domain of a kind for every vehicle the credential can reach.
+ *
+ * This used to slice to the first ten VINs with no cursor and no marker, so a
+ * fleet credential silently saw 10 of its 12 cars and the listing looked complete.
+ * There is no cursor in the SDK's resource listing callback, so the honest answer
+ * is all of them; a failure to list vehicles is an error, not an empty array that
+ * looks like "you own no cars".
+ */
+export async function listVehicleResources(engine: Engine, deps: ToolDeps, kind: ResourceKind): Promise<VehicleResource[]> {
+  const vins = await engine.client.vehicles();
+  return vins.flatMap((vin) => {
+    const label = resourceLabel(vin, deps);
+    return domainsOf(kind).map((domain) => ({
+      uri: `polestar://vehicle/${vin}/${kind}/${domain}`,
+      name: `${domain} (${label})`,
+      description: `${kind}/${domain} for vehicle ${label}`,
+      mimeType: 'text/plain',
+    }));
+  });
+}
+
+/** Completion values for a resource template variable; VINs obey POLESTAR_REDACT_VIN. */
+export async function completeVehicleResource(
+  engine: Engine,
+  deps: ToolDeps,
+  kind: ResourceKind,
+  variable: 'vin' | 'domain',
+  value: string,
+): Promise<string[]> {
+  if (variable === 'domain') {
+    return domainsOf(kind).filter((d) => d.includes(value.toLowerCase())).slice(0, 20);
+  }
+  let vins: string[];
+  try {
+    vins = await engine.client.vehicles();
+  } catch {
+    return [];
+  }
+  return vins
+    .map((vin) => maskVin(vin, deps.redactVin))
+    .filter((vin) => vin.toLowerCase().includes(value.toLowerCase()))
+    .slice(0, 20);
+}
+
+/**
+ * One resource read: the same read the matching get_* tool performs, so a
+ * resource gains the age header, the owner label, the redaction and the
+ * delegation check instead of a second, smaller implementation.
+ *
+ * An unknown Domain is a protocol error rather than content: answering with a
+ * text block made a typo look like a successful read whose text happened to say
+ * "Unknown domain", which no client can branch on.
+ */
+export async function readVehicleResource(
+  deps: ToolDeps,
+  kind: ResourceKind,
+  uri: URL,
+  variables: ResourceVariables,
+): Promise<{ contents: Array<{ uri: string; text: string; mimeType: string }> }> {
+  const rawVin = variables.vin;
+  const vin = decodeURIComponent(String(Array.isArray(rawVin) ? rawVin[0] ?? '' : rawVin ?? ''));
+  const domain = String(Array.isArray(variables.domain) ? variables.domain[0] ?? '' : variables.domain ?? '');
+  const spec = DOMAINS.find((d) => d.kind === kind && d.name === domain);
+  if (!spec) {
+    const exception =
+      deps.redactVin
+        ? ' Resource names, descriptions and completions are masked because POLESTAR_REDACT_VIN is on; the resource URI keeps the raw VIN as the documented exception.'
+        : '';
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      `Unknown ${kind} domain ${JSON.stringify(domain)}. Use one of the resource domains listed in resources/list.${exception}`,
+    );
+  }
+  const outcome = await readDomain(deps, spec, vin === '' ? {} : { vin }, undefined);
+  const body = outcome.ok ? outcome.reading.text : resultText(outcome.result);
+  return { contents: [{ uri: uri.href, text: body, mimeType: 'text/plain' }] };
+}
 
 function registerResources(
   server: McpServer,
@@ -269,55 +424,18 @@ function registerResources(
   subscriptions: SubscriptionPoller,
   subscriptionsAllowed: boolean,
 ): void {
-  const domainsOf = (kind: (typeof RESOURCE_KINDS)[number]): string[] =>
-    DOMAINS.filter((d) => d.kind === kind).map((d) => d.name);
-
   for (const kind of RESOURCE_KINDS) {
     server.registerResource(
       `Vehicle ${kind} domains`,
       new ResourceTemplate(`polestar://vehicle/{vin}/${kind}/{domain}`, {
-        list: async () => {
-          try {
-            const vins = await engine.client.vehicles();
-            return {
-              resources: vins.slice(0, 10).flatMap((vin) =>
-                domainsOf(kind).map((domain) => ({
-                  uri: `polestar://vehicle/${vin}/${kind}/${domain}`,
-                  name: `${domain} (…${vin.slice(-4)})`,
-                  description: `${kind}/${domain} for vehicle …${vin.slice(-4)}`,
-                  mimeType: 'text/plain',
-                })),
-              ),
-            };
-          } catch {
-            return { resources: [] };
-          }
-        },
+        list: async () => ({ resources: await listVehicleResources(engine, deps, kind) }),
         complete: {
-          vin: async (value: string) => {
-            const vins = await engine.client.vehicles().catch(() => []);
-            return vins.filter((v) => v.toLowerCase().includes(value.toLowerCase())).slice(0, 20);
-          },
-          domain: async (value: string) =>
-            domainsOf(kind).filter((d) => d.includes(value.toLowerCase())).slice(0, 20),
+          vin: (value: string) => completeVehicleResource(engine, deps, kind, 'vin', value),
+          domain: (value: string) => completeVehicleResource(engine, deps, kind, 'domain', value),
         },
       }),
-      { description: `Live ${kind} for one vehicle and domain, humanized.`, mimeType: 'text/plain' },
-      async (uri, variables) => {
-        const vin = decodeURIComponent(String(variables.vin ?? ''));
-        const domain = String(variables.domain ?? '');
-        const spec = DOMAINS.find((d) => d.kind === kind && d.name === domain);
-        if (!spec) {
-          return { contents: [{ uri: uri.href, text: `Unknown ${kind} domain "${domain}".`, mimeType: 'text/plain' }] };
-        }
-        // The very read get_${spec.name.replace(/-/g, '_')} performs, so a resource
-        // gains the age header, the owner label, the redaction and the delegation
-        // check instead of a second, smaller implementation of the same read. A
-        // resource cannot answer isError, so a failure arrives as text.
-        const outcome = await readDomain(deps, spec, vin === '' ? {} : { vin }, undefined);
-        const body = outcome.ok ? outcome.reading.text : resultText(outcome.result);
-        return { contents: [{ uri: uri.href, text: body, mimeType: 'text/plain' }] };
-      },
+      { description: `Live ${kind} for one vehicle and domain, humanized. The URI keeps the raw VIN.`, mimeType: 'text/plain' },
+      (uri, variables) => readVehicleResource(deps, kind, uri, variables as ResourceVariables),
     );
   }
 
@@ -326,6 +444,8 @@ function registerResources(
   // this from the handshake rather than from a subscription that never fires.
   if (!subscriptionsAllowed) return;
   server.server.setRequestHandler('resources/subscribe', async (request: { params: { uri: string } }) => {
+    // A bad URI or a full subscription set throws a JSON-RPC invalid-params
+    // error; it used to start a timer that polled nothing forever.
     await subscriptions.subscribe(request.params.uri);
     return {};
   });
@@ -335,91 +455,143 @@ function registerResources(
   });
 }
 
-function registerPrompts(server: McpServer): void {
-  const first = (value: string | string[] | undefined): string | undefined => (Array.isArray(value) ? value[0] : value);
-
-  server.registerPrompt(
-    'car-status',
-    {
-      title: 'Car status briefing',
-      description: 'A one-glance briefing: charge, range, security, and anything needing attention.',
-      argsSchema: z.object({ vin: z.string().optional() }),
-    },
-    (args) => {
-      const vin = args?.vin;
-      return {
-        messages: [
-          {
-            role: 'user' as const,
-            content: {
-              type: 'text',
-              text: `Give me a status briefing for my Polestar${first(vin) ? ` (VIN ${first(vin)})` : ''}. Use get_car_status, then is_car_secure, then get_needs_attention, and finish with a two-line summary plus anything that needs action.`,
-            },
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerPrompt(
-    'charge-plan',
-    {
-      title: 'Cheapest charge plan',
-      description: 'Plan the cheapest charging hours for tonight given spot prices.',
-      argsSchema: z.object({ vin: z.string().optional(), prices: z.string().optional() }),
-    },
-    (args) => {
-      const vin = args?.vin;
-      const prices = args?.prices;
-      return {
-        messages: [
-          {
-            role: 'user' as const,
-            content: {
-              type: 'text',
-              text: `I want to charge my Polestar as cheaply as possible tonight${first(vin) ? ` (VIN ${first(vin)})` : ''}. Spot prices from my tariff provider: ${first(prices) ?? 'ask me for hourly prices as {"startsAt": ISO, "price": number} pairs before planning'}. Call plan_cheapest_charge with these prices and present the result as a simple schedule with estimated cost.`,
-            },
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerPrompt(
-    'battery-health-report',
-    {
-      title: 'Battery health report',
-      description: 'Degradation and charging-session report from recorded history.',
-      argsSchema: z.object({ vin: z.string().optional() }),
-    },
-    (args) => {
-      const vin = args?.vin;
-      return {
-        messages: [
-          {
-            role: 'user' as const,
-            content: {
-              type: 'text',
-              text: `Report on my Polestar's battery health${first(vin) ? ` (VIN ${first(vin)})` : ''}: call get_degradation_report and get_charging_sessions, summarize the implied capacity trend, and say clearly whether there is enough history to conclude anything.`,
-            },
-          },
-        ],
-      };
-    },
-  );
+/**
+ * What the initialize result tells the model about this process.
+ *
+ * Every sentence has to be true of the surface that registered it: the history
+ * sentence appears only with a history store, units follow POLESTAR_UNITS, the
+ * delegation sentence appears only when the operator configured accounts, and the
+ * requestId promise is conditional because a locally minted failure carries none.
+ * `vin` is described as optional rather than telling every caller to start with
+ * list_vehicles, which forced a live call on a single-car credential.
+ */
+export interface InstructionsInput {
+  aggregates: readonly string[];
+  domainCount: number;
+  budgetLimit: number;
+  minuteLimit: number;
+  history: boolean;
+  units: Units;
+  delegated: boolean;
 }
 
-/** Serve the same MCP surface over Streamable HTTP (stateless mode). */
-async function serveHttp(engine: Engine, port: number): Promise<void> {
-  // The rule lives in bind.ts as a function so it can be tested without opening
-  // a socket: binding a location-reading server to a routable address with no
-  // token must be refused before anything listens.
-  const bind = decideBind({ host: engine.config.httpHost, token: engine.config.httpToken });
-  if (!bind.ok) throw new Error(bind.reason);
-  const { host } = bind;
-  const token = bind.token ?? '';
-  const httpServer = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
-    if (token !== '' && req.headers.authorization !== `Bearer ${token}`) {
+export function buildInstructions(input: InstructionsInput): string {
+  return [
+    'Polestar Data Portal (M2M) is READ-ONLY: every tool is a GET, no command is sent to the car.',
+    'A vin argument is optional when the credential sees exactly one vehicle; list_vehicles names the vehicles this credential can reach.',
+    'Domain data is reported by the car, not by the API: fields are absent when unreported, and a whole domain can answer DATA_NOT_AVAILABLE. That is normal, not an error.',
+    `Prefer ${input.aggregates.join(' or ')} over the ${input.domainCount} individual domain reads; every live call spends a shared allowance of ${input.budgetLimit.toLocaleString('en-US')} calls/day and ${input.minuteLimit}/minute, and polestar_status reports what is left.`,
+    'Every payload carries an age: charging configuration can be days old while telemetry is minutes old, so read the age before treating a value as current.',
+    ...(input.history
+      ? [`History tools (${historyToolNames.join(', ')}) answer from the local history store and are empty until a read has been recorded.`]
+      : []),
+    `Distances are rendered in ${input.units === 'mi' ? 'miles' : 'kilometres'}.`,
+    ...(input.delegated
+      ? ["A delegated_account_id from POLESTAR_DELEGATED_ACCOUNT_IDS reads that account's shared vehicles for one call."]
+      : []),
+    'Failures return structured JSON with a code and httpStatus, plus requestId when the upstream sent one; quote it only then.',
+  ].join(' ');
+}
+
+/** One prompt as a value: the same array is what the server registers and what a test renders. */
+export interface PromptSpec {
+  name: string;
+  title: string;
+  description: string;
+  argsSchema: z.ZodRawShape;
+  build(args: Record<string, unknown> | undefined): {
+    messages: Array<{ role: 'user'; content: { type: 'text'; text: string } }>;
+  };
+}
+
+/**
+ * The prompt surface for one running configuration.
+ *
+ * `battery-health-report` is built only when the history tools are, because a
+ * default start used to register a prompt telling the model to call two tools
+ * that were never registered.
+ */
+export function promptSpecs(options: { history: boolean }): PromptSpec[] {
+  const first = (value: unknown): string | undefined => (Array.isArray(value) ? (value[0] as string | undefined) : typeof value === 'string' ? value : undefined);
+  const message = (text: string) => ({ messages: [{ role: 'user' as const, content: { type: 'text' as const, text } }] });
+
+  const specs: PromptSpec[] = [
+    {
+      name: 'car-status',
+      title: 'Car status briefing',
+      description: 'A one-glance briefing: charge, range, security, and anything needing attention.',
+      argsSchema: { vin: z.string().optional() },
+      build(args) {
+        const vin = first(args?.vin);
+        return message(
+          `Give me a status briefing for my Polestar${vin ? ` (VIN ${vin})` : ''}. Use get_car_status, then is_car_secure, then get_needs_attention, and finish with a two-line summary plus anything that needs action.`,
+        );
+      },
+    },
+    {
+      name: 'charge-plan',
+      title: 'Cheapest charge plan',
+      description: 'Plan the cheapest charging hours for tonight given spot prices.',
+      argsSchema: { vin: z.string().optional(), prices: z.string().optional() },
+      build(args) {
+        const vin = first(args?.vin);
+        const prices = first(args?.prices);
+        return message(
+          `I want to charge my Polestar as cheaply as possible tonight${vin ? ` (VIN ${vin})` : ''}. Spot prices from my tariff provider: ${prices ?? 'ask me for hourly prices as {"startsAt": ISO, "price": number} pairs before planning'}. Call plan_cheapest_charge with these prices and present the result as a simple schedule with estimated cost.`,
+        );
+      },
+    },
+  ];
+
+  if (options.history) {
+    specs.push({
+      name: 'battery-health-report',
+      title: 'Battery health report',
+      description: 'Degradation and charging-session report from recorded history.',
+      argsSchema: { vin: z.string().optional() },
+      build(args) {
+        const vin = first(args?.vin);
+        return message(
+          `Report on my Polestar's battery health${vin ? ` (VIN ${vin})` : ''}: call get_degradation_report and get_charging_sessions, summarize the implied capacity trend, and say clearly whether there is enough history to conclude anything.`,
+        );
+      },
+    });
+  }
+  return specs;
+}
+
+function registerPrompts(server: McpServer, specs: readonly PromptSpec[]): void {
+  for (const spec of specs) {
+    server.registerPrompt(
+      spec.name,
+      { title: spec.title, description: spec.description, argsSchema: z.object(spec.argsSchema) },
+      (args) => spec.build(args as Record<string, unknown> | undefined),
+    );
+  }
+}
+
+/**
+ * The HTTP request gate for one bound listener: Host, Origin and bearer token,
+ * all decided from headers before the transport reads a byte of the body.
+ *
+ * Exported because the guards have to be exercised over a real socket in a way
+ * `decideHttpRequest` alone cannot prove: this is the function the listener
+ * actually installs first.
+ */
+export function createHttpHandler(engine: Engine, bind: BindSuccess): (req: IncomingMessage, res: ServerResponse) => void {
+  const token = bind.token;
+  return (req: IncomingMessage, res: ServerResponse) => {
+    const guard = decideHttpRequest({
+      boundHost: bind.host,
+      allowedOrigins: engine.config.httpAllowedOrigins,
+      hostHeader: req.headers.host,
+      originHeader: typeof req.headers.origin === 'string' ? req.headers.origin : undefined,
+    });
+    if (!guard.ok) {
+      res.writeHead(403, { 'content-type': 'application/json' }).end(forbiddenBody(guard.message));
+      return;
+    }
+    if (token !== undefined && !bearerMatches(typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined, token)) {
       res.writeHead(401, { 'content-type': 'application/json', 'www-authenticate': 'Bearer' }).end(unauthenticatedBody());
       return;
     }
@@ -441,9 +613,25 @@ async function serveHttp(engine: Engine, port: number): Promise<void> {
       engine.log(`HTTP request failed: ${err instanceof Error ? err.message : err}`);
       if (!res.headersSent) res.writeHead(500).end();
     });
-  });
-  const guarded = httpServer;
-  if (token !== '') engine.log('HTTP mode: Authorization: Bearer <POLESTAR_HTTP_TOKEN> required');
+  };
+}
+
+/** Serve the same MCP surface over Streamable HTTP (stateless mode). */
+async function serveHttp(engine: Engine, port: number): Promise<void> {
+  // The rule lives in bind.ts as a function so it can be tested without opening
+  // a socket: binding a location-reading server to a routable address with no
+  // token must be refused before anything listens.
+  const bind = decideBind({ host: engine.config.httpHost, token: engine.config.httpToken });
+  if (!bind.ok) throw new Error(bind.reason);
+  const { host } = bind;
+  const guarded = createHttpServer(createHttpHandler(engine, bind));
+  if (bind.token !== undefined) engine.log('HTTP mode: Authorization: Bearer <POLESTAR_HTTP_TOKEN> required');
+  const origins = engine.config.httpAllowedOrigins;
+  engine.log(
+    origins.length === 0
+      ? 'HTTP mode: Origin must match the request host; set POLESTAR_HTTP_ALLOWED_ORIGINS to admit a browser client'
+      : `HTTP mode: allowed origins ${origins.join(', ')}`,
+  );
   await new Promise<void>((resolveListen) => guarded.listen(port, host, resolveListen));
   startSampler(engine);
   installShutdown(async () => { engine.sampler?.stop(); guarded.close(); }, engine.log);

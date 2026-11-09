@@ -109,9 +109,21 @@ export function toFailure(err: unknown): Failure {
   return base(String(err));
 }
 
-/** The one text rendering of a failure, shared by tools and resources. */
+/**
+ * The one text rendering of a failure, shared by tools and resources.
+ *
+ * A minted code was raised by this server: a refused argument, an allowlist
+ * decision, the budget guard, or a transport failure. Printing "Polestar API
+ * error" for one of those blames the upstream for a local decision, and the
+ * HTTP status attached to a minted failure is synthesized rather than observed,
+ * so it is deliberately left out. The Data Portal's own codes keep the upstream
+ * wording and the status the API actually answered with.
+ */
 export function describeFailure(f: Failure): string {
-  const parts = [`Polestar API error ${f.code} (HTTP ${f.httpStatus ?? 'n/a'}): ${f.message}`];
+  const parts =
+    f.minted !== undefined
+      ? [`Server refused ${f.code}: ${f.message}`]
+      : [`Polestar API error ${f.code} (HTTP ${f.httpStatus ?? 'n/a'}): ${f.message}`];
   if (f.requestId !== undefined) parts.push(`requestId: ${f.requestId}`);
   return parts.join(', ');
 }

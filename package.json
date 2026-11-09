@@ -3,8 +3,9 @@
   "version": "0.3.0",
   "description": "MCP server for the Polestar Data Portal M2M API (telemetry + charging, read-only)",
   "type": "module",
+  "mcpName": "io.github.nicolaskheirallah/polestar-mcp",
   "engines": {
-    "node": ">=20.6.0"
+    "node": ">=20.11.0"
   },
   "main": "build/server.js",
   "bin": {
@@ -15,6 +16,7 @@
     "start": "node build/server.js",
     "test": "node --import tsx --test --test-reporter=tap \"test/\"*.test.ts",
     "smoke": "node --import tsx scripts/smoke.ts",
+    "demo": "node scripts/demo.mjs",
     "demo-dump": "node --import tsx scripts/demo-dump.ts",
     "check-secrets": "node scripts/check-secrets.mjs",
     "dev": "node --import tsx src/server.ts",
@@ -22,13 +24,15 @@
     "smoke-http": "node --import tsx scripts/smoke-http.ts",
     "postbuild": "node -e \"require('node:fs').chmodSync('build/server.js',0o755)\"",
     "prepack": "npm run build",
-    "coverage": "node --import tsx --test --experimental-test-coverage --test-reporter=spec \"test/\"*.test.ts",
+    "coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 --test-reporter=spec \"test/\"*.test.ts",
     "capture": "node --import tsx scripts/capture.ts",
     "capture:sanitize": "node --import tsx scripts/capture.ts --from ..",
     "verify-fixtures": "node --import tsx scripts/verify-fixtures.mjs",
     "inspect": "node --import tsx scripts/server-for-inspector.ts",
     "check-tool-refs": "node scripts/check-tool-refs.mjs",
     "check-docs": "node docs/check-docs.mjs",
+    "check-version": "node scripts/check-version.mjs",
+    "check-server-json": "node scripts/validate-server-json.mjs",
     "smoke-bin": "node --import tsx scripts/smoke-bin.ts"
   },
   "dependencies": {
@@ -44,6 +48,8 @@
   "license": "MIT",
   "files": [
     "build",
+    "scripts/demo.mjs",
+    "test/fixtures/dump",
     "README.md",
     "LICENSE",
     ".env.example",

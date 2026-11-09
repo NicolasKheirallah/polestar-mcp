@@ -107,7 +107,7 @@ export function formatAge(observedAtMs: number, nowMs: number): string {
 }
 
 /** Observation time of a domain payload, epoch ms. Owned by the reader module. */
-export { observedAtMs } from './domain-data.js';
+export { observedAtMs, valueObservedAtMs } from './domain-data.js';
 
 /** The owner's word for a VIN, when they supplied one. */
 function labelFor(vin: string, labels: Record<string, string>): string | undefined {
@@ -126,6 +126,25 @@ export function vinLabel(vin: string, redact: boolean, labels?: Record<string, s
   const label = labels !== undefined ? labelFor(vin, labels) : undefined;
   if (label !== undefined) return label;
   return maskVin(vin, redact);
+}
+
+/**
+ * A clock hour as a reader can interpret it. Timer payloads use 24 and above for
+ * the hours after midnight (`stop.hour: 28` means 04:00), and printing
+ * `22:00 → 28:00` tells a human nothing.
+ */
+export function normalizeHour(hour: number | undefined): number | undefined {
+  return hour === undefined ? undefined : ((Math.floor(hour) % 24) + 24) % 24;
+}
+
+/** A fixed UTC offset in minutes, as `UTC+02:00`. */
+export function formatUtcOffset(offsetMinutes: number | undefined): string | undefined {
+  if (offsetMinutes === undefined || !Number.isFinite(offsetMinutes)) return undefined;
+  const sign = offsetMinutes < 0 ? '-' : '+';
+  const absolute = Math.abs(Math.round(offsetMinutes));
+  const hours = String(Math.floor(absolute / 60)).padStart(2, '0');
+  const minutes = String(absolute % 60).padStart(2, '0');
+  return `UTC${sign}${hours}:${minutes}`;
 }
 
 // Both are live: domain tool summaries and subscribed resources render through
@@ -165,8 +184,12 @@ export function summarizeDomain(name: string, data: Record<string, unknown>, uni
     case 'location': {
       const coordinate = position(data);
       if (coordinate === undefined || coordinate.latitude === undefined) return ['Position unknown'];
+      const details: string[] = [];
+      if (coordinate.heading !== undefined) details.push(`heading ${coordinate.heading}°`);
+      if (coordinate.speedKmh !== undefined) details.push(`${coordinate.speedKmh} km/h`);
+      if (coordinate.altitude !== undefined) details.push(`altitude ${coordinate.altitude} m`);
       return [
-        `Position: ${coordinate.latitude.toFixed(5)}, ${coordinate.longitude?.toFixed(5) ?? 'n/a'} (heading ${coordinate.heading ?? ''}°, ${coordinate.speedKmh ?? 0} km/h)`,
+        `Position: ${coordinate.latitude.toFixed(5)}, ${coordinate.longitude?.toFixed(5) ?? 'n/a'}${details.length > 0 ? ` (${details.join(', ')})` : ''}`,
         `Map: https://www.google.com/maps?q=${coordinate.latitude},${coordinate.longitude}`,
       ];
     }
@@ -223,8 +246,15 @@ export function summarizeDomain(name: string, data: Record<string, unknown>, uni
     case 'global-charge-timer': {
       const timer = chargeWindow(data);
       if (timer === undefined) return ['No global charge timer set'];
-      const hours = `${timer.startHour ?? 'n/a'}:00 → ${timer.stopHour ?? 'n/a'}:00`;
-      return [timer.activated ? `Charge window: ${hours} (active)` : `Charge window: ${hours} (defined but inactive)`];
+      const pad = (hour: number | undefined): string => (hour === undefined ? 'n/a' : String(hour).padStart(2, '0'));
+      const hours = `${pad(normalizeHour(timer.startHour))}:00 → ${pad(normalizeHour(timer.stopHour))}:00`;
+      const offset = formatUtcOffset(timer.offsetMinutes);
+      const state = timer.activated === true
+        ? 'active'
+        : timer.activated === false
+          ? 'defined but inactive'
+          : 'activation not reported';
+      return [`Charge window: ${hours}${offset !== undefined ? ` (${offset})` : ''} (${state})`];
     }
     case 'parking-climate-timer': {
       const timers = (data.parkingClimateTimers as { activated?: boolean; readyAt?: { hour?: number }; weekdays?: string[] }[] | undefined) ?? [];

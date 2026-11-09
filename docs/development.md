@@ -64,13 +64,17 @@ polestar-mcp/
 | `npm run dev` | Runs `src/server.ts` directly through tsx, no build step |
 | `npm test` | The unit suites through the Node test runner (TAP output) |
 | `npm run smoke` | Full stdio integration test against the sanitized fixtures |
-| `npm run smoke-bin` | The same surface reached the way an install reaches it: through the bin symlink, plus `--version` and `--help`. |
+| `npm run smoke-bin` | The published launch path: `--version`, `--help` and a handshake through the bin symlink. It does not list tools or call one. |
 | `npm run smoke-http` | Full Streamable HTTP integration test |
-| `npm run demo-dump` | Full stdio integration test against the real captured dump one level up |
+| `npm run demo` | Offline demo against the shipped synthetic dump, plain Node, prints `DUMP_OK` |
+| `npm run demo-dump` | Full stdio integration test against the shipped dump; set `POLESTAR_FIXTURES_DIR` for a real capture |
+| `npm run coverage` | Unit suite with the lines 90, branches 80 and functions 85 floors |
 | `npm run check-secrets` | The secret-hygiene check |
+| `npm run check-version` | Package, registry file, README badge, changelog and release note agree |
+| `npm run check-server-json` | The registry metadata shape the 2025-12-11 schema requires |
 | `npm run typecheck` | Types src, test, and scripts together with no emit |
 
-Node 20 or newer is required (the engine field enforces it). The production build targets ES2022 with strict settings turned up: `strict`, `noUncheckedIndexedAccess`, and `exactOptionalPropertyTypes`. The dev typecheck covers `test/` and `scripts/` under the same settings, so no source file is exempt from the declared contract.
+Node 20.11 or newer is required (the engine field states it; CI runs 20.11, 22 and 24). The production build targets ES2022 with strict settings turned up: `strict`, `noUncheckedIndexedAccess`, and `exactOptionalPropertyTypes`. The dev typecheck covers `test/` and `scripts/` under the same settings, so no source file is exempt from the declared contract.
 
 ## What the unit tests prove
 
@@ -90,11 +94,11 @@ The suites run through a `ScriptedTransport` that hands out pre-written response
 
 `npm run smoke-http` starts the server with `POLESTAR_HTTP_PORT` set and speaks plain JSON-RPC over HTTP POSTs (stateless mode): handshake, tool registry, a `get_battery` call, and a resource read. It prints `HTTP_SMOKE_OK`.
 
-`npm run demo-dump` runs the stdio checks against the real captured dump in the parent directory (the `api_endpoints` folder this project lives in), which proves the fixture layout matches reality. It prints `DUMP_OK` on success and never prints VINs or data values beyond existence checks.
+`npm run demo` is the package-safe demo: plain Node, no tsx, it spawns `build/server.js` against `test/fixtures/dump` and prints `DUMP_OK`. `npm run demo-dump` is the contributor variant through tsx; it defaults to the same shipped dump, and `POLESTAR_FIXTURES_DIR` points it at a real capture to prove the fixture layout matches reality. Both print `DUMP_OK` on success and never print VINs or data values beyond existence checks.
 
 ## Verification
 
-Verification is the CI workflow, not a ledger in the tree: `typecheck`, `build`, `verify-fixtures`, `test`, `coverage`, both smoke runs, `check-secrets`, `check-tool-refs` and the four `docs/check-docs.mjs` checks. Each one prints a success marker only after every assertion passes, and each is described in [CONTRIBUTING.md](../CONTRIBUTING.md). Where a check is only meaningful if it can reject something, it runs a positive control first, so a green result cannot mean the detector quietly stopped looking.
+Verification is the CI workflow, not a ledger in the tree: `typecheck`, `build`, `verify-fixtures`, `test`, `coverage` with its thresholds, the stdio, HTTP and bin smokes, `demo` and `demo-dump`, `check-secrets`, `check-tool-refs`, `check-version`, `check-server-json` and the four `docs/check-docs.mjs` checks. Separate jobs pack and install the tarball, build the image, and run a Node floor matrix at 20.11, 22 and 24. Each one prints a success marker only after every assertion passes, and each is described in [CONTRIBUTING.md](../CONTRIBUTING.md). Where a check is only meaningful if it can reject something, it runs a positive control first, so a green result cannot mean the detector quietly stopped looking.
 
 
 Run the checks rather than trusting any summary in these pages.
@@ -123,4 +127,4 @@ A tool outside the domain table (like the aggregates) lives in its own module as
 
 ## Versioning
 
-The server reports its version in the MCP handshake from `package.json` (currently 0.3.0), so there is exactly one version number to bump.
+The server reports its version in the MCP handshake from `package.json` (currently 0.3.0). `npm run check-version` fails unless `server.json`, the README badge, the newest released CHANGELOG heading and `docs/releases/vX.Y.Z.md` agree, so the tag is the one version decision and the copies cannot drift.

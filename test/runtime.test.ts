@@ -365,12 +365,13 @@ test('POLESTAR_REDACT_VIN covers the structured envelope, not only the text', as
 });
 
 test('every tool that reads a domain says its absence in the same words', async () => {
-  // Nine tools each phrased this themselves. get_battery and readDomainFormatted
-  // said one thing, is_car_secure said "No exterior data available for …",
-  // get_needs_attention said "No health data available…", get_charging_estimate
-  // said "No battery data available, cannot estimate.", and plan_cheapest_charge
-  // said "Missing required data". A caller reading two tools had no way to know
-  // whether the car disagreed or the server did.
+  // Nine tools each phrased this themselves. M4 changed how an aggregate opens
+  // when its inputs are missing: a verdict starts from "Unknown, not reported"
+  // and get_car_status lists the Domains it could not read, because "No exterior
+  // data is available" read as a passed check. What must survive every rewrite is
+  // the shared statement of cause, the API answered DATA_NOT_AVAILABLE, because
+  // that is what tells a caller this is absence and not a value. A real failure
+  // must still arrive as an error and must never borrow that sentence.
   const vin = 'YSMTEST22PL000001';
   const client = {
     async resolveVin(v?: string) { return v ?? vin; },
@@ -379,12 +380,39 @@ test('every tool that reads a domain says its absence in the same words', async 
   } as unknown as PolestarClient;
   const deps = { client, redactVin: false, vehicleLabels: {}, delegatedAccounts: [], units: 'km' } as ToolDeps;
   const specs = [...domainToolSpecs(deps), ...aggregateToolSpecs(deps), ...advisorToolSpecs(deps)];
-  const expected = /\(the API returned DATA_NOT_AVAILABLE, this vehicle does not report this domain\)\./;
+  const expected = /the API returned DATA_NOT_AVAILABLE/;
+  const singleDomainTools = ['get_battery', 'get_charging_estimate', 'plan_cheapest_charge'];
+  const aggregateTools = ['get_car_status', 'is_car_secure', 'get_needs_attention'];
+  const runTool = async (toolSpecs: ReturnType<typeof domainToolSpecs>, name: string) =>
+    toolSpec(toolSpecs, name).run(name === 'plan_cheapest_charge' ? { prices: [] } : {}, {});
 
-  for (const name of ['get_battery', 'get_car_status', 'is_car_secure', 'get_needs_attention', 'get_charging_estimate', 'plan_cheapest_charge']) {
-    const args = name === 'plan_cheapest_charge' ? { prices: [] } : {};
-    const out = await toolSpec(specs, name).run(args, {});
-    assert.match(out.content[0]!.text, expected, `${name} states the absence in the shared words`);
+  for (const name of [...singleDomainTools, ...aggregateTools]) {
+    const out = await runTool(specs, name);
+    assert.equal(out.isError, undefined, `${name} answers an absent Domain, it does not fail`);
+    assert.match(out.content[0]!.text, expected, `${name} names the shared cause of its absence`);
+  }
+
+  // A missing reading is not a verdict about the car: an aggregate must never
+  // open with Yes, No or Nothing when it has no data to judge from.
+  for (const name of aggregateTools) {
+    const out = await runTool(specs, name);
+    assert.doesNotMatch(out.content[0]!.text, /^(Yes|No|Nothing)\b/, `${name} must not turn absence into a yes/no answer`);
+  }
+
+  // The same tools against a real upstream failure: an error, with no absence
+  // claim, so a refusal can never be read as "the car reports nothing".
+  const failing = {
+    async resolveVin(v?: string) { return v ?? vin; },
+    async vehicles() { return [vin]; },
+    async domain() { throw new PolestarApiError('AUTHZ_VIN_UNAUTHORIZED', 'not allowed', 403); },
+  } as unknown as PolestarClient;
+  const errDeps = { ...deps, client: failing } as ToolDeps;
+  const errSpecs = [...domainToolSpecs(errDeps), ...aggregateToolSpecs(errDeps), ...advisorToolSpecs(errDeps)];
+  for (const name of [...singleDomainTools, ...aggregateTools]) {
+    const out = await runTool(errSpecs, name);
+    assert.equal(out.isError, true, `${name} surfaces the upstream failure`);
+    assert.notEqual(out.structuredContent?.code, 'DATA_NOT_AVAILABLE', `${name} must not label a real error as absence`);
+    assert.doesNotMatch(out.content[0]!.text, expected, `${name} must not claim the API answered DATA_NOT_AVAILABLE`);
   }
 });
 

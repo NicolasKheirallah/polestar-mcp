@@ -6,7 +6,7 @@ There are 23 tools registered on every start, and 26 with history enabled (three
 
 ## How tools map to the API
 
-Each `get_*` tool wraps exactly one GET endpoint of the Polestar Data Portal M2M API. The naming rule is mechanical: for an API domain named `target-soc`, the tool is `get_target_soc`. The tool's description (what your assistant reads when deciding which tool to call) includes the endpoint path and the OAuth scope, so the mapping stays visible to the AI client too.
+Each `get_*` tool wraps exactly one GET endpoint of the Polestar Data Portal M2M API. The naming rule is mechanical: for an API domain named `target-soc`, the tool is `get_target_soc`. Tool descriptions are short routing text: the Domain summary an assistant matches against. The endpoint path and OAuth scope for every Domain are printed by `list_domains` and listed in the table below, so the mapping stays visible to a developer and to the model without repeating it in all 15 descriptions.
 
 The 15 domain tools (one for each of the 15 read domains of the v1 API) are table-driven: one `DOMAINS` entry per read domain, from which the tool name, registration, scope collection, and resource URIs all derive. The aggregate, advisor, system, and history tools are hand-registered in their own modules and read the same data through the client (so they share the cache and the daily budget).
 
@@ -20,7 +20,11 @@ Three arguments are shared by most tools:
 
 Every tool that reads a car takes the first and the last of these, including the aggregates, the advisor and the history tools: a tool that reads a car on a fleet credential has to be able to say which account it is reading.
 
+Argument names are validated strictly: an unrecognized argument is refused with an error naming the key (for example `Unrecognized key: "vinn"`) instead of being dropped, so a misspelled `vin` cannot silently read the default car.
+
 All tools return text content. Domain reads answer with a short humanized summary plus a data age ("data observed 5 min ago"); the raw JSON is one `raw: true` away.
+
+A successful result sends that text once in `content`, plus structured data in `structuredContent.data` where a tool populates one (`list_vehicles` returns `{count, vehicles}`). Success results carry no `structuredContent.message`; that field is used on failures, where it differs from the text. Clients should read the content text or the structured data, not a `message` field on success.
 
 ## The domain tools (15 + list_vehicles + list_domains)
 
@@ -100,9 +104,9 @@ The aggregates exist because the questions people actually ask span several doma
 
 Registered only when the server runs with a history directory (`POLESTAR_HISTORY_DIR`). They answer the longitudinal questions the stateless API cannot:
 
-- `get_history`: raw recorded samples for one domain, one line per change, newest first. Duplicates (same cloud `metaEventId`) are never stored twice. The domain is checked against the registry first, so a name no Domain has is an `UNKNOWN_DOMAIN` error naming `list_domains` rather than an empty history that looks like a car that reported nothing.
-- `get_degradation_report`: the trend of the battery's implied full-charge range (range divided by SoC) and implied pack capacity over recorded history, presented as a series of estimates rather than a single verdict. Needs at least 5 recorded samples.
-- `get_charging_sessions`: charging sessions reconstructed from recorded battery samples: start, duration, peak power, and the maximum charge level reached.
+- `get_history`: raw recorded samples for one domain, one line per change, newest first. Duplicates (same cloud `metaEventId`) are never stored twice. Each line is dated by the value's own clock when the recorder stored one; records written before that clock existed are dated by the server read clock. Paging takes `offset` or `before`, and a truncated answer ends with a line saying more records are available and which argument pages them. The domain is checked against the registry first, so a name no Domain has is an `UNKNOWN_DOMAIN` error naming `list_domains` rather than an empty history that looks like a car that reported nothing.
+- `get_degradation_report`: the trend of the battery's implied full-charge range (range divided by SoC) and implied pack capacity over recorded history, presented as an estimate rather than a verdict. Needs at least 5 usable samples and at least 7 days between the first and last one (a smaller `days` argument narrows both the data and the required span); below that it says the result is a series, not an estimate yet, and states the span. Range depends on conditions, so read the assumptions and the sample list rather than a single number.
+- `get_charging_sessions`: charging sessions reconstructed from recorded battery samples: start, the span between the first and last charging sample with gaps included (it is a span, not a duration), peak power when the car reported it, and the maximum charge level reached. A one-sample session says no span was observed rather than inventing one.
 
 ## Resources, prompts, and annotations
 

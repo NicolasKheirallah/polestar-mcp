@@ -7,7 +7,7 @@
 A [Model Context Protocol](https://modelcontextprotocol.io) server for the [Polestar Data Portal M2M API](https://data-portal.polestar.com), built for any MCP client: Claude Desktop, ZCode, Cursor, or your own tooling.
 
 ![version](https://img.shields.io/badge/version-0.3.0-blue)
-![node](https://img.shields.io/badge/node-%3E%3D20-green)
+![node](https://img.shields.io/badge/node-%3E%3D20.11-green)
 ![tools](https://img.shields.io/badge/tools-26-blueviolet)
 ![API](https://img.shields.io/badge/Polestar_API-read_only-orange)
 ![offline demo](https://img.shields.io/badge/offline_demo-yes-success)
@@ -33,7 +33,7 @@ Every answer is a read. Polestar's documented v1 API publishes no write endpoint
 | "Where is the car?" | `get_location` | Last known position with heading, speed, and data age |
 | "How has the battery aged?" | `get_degradation_report` | Capacity and range trends (needs history, see below) |
 
-Domain tools answer in short prose with the data age in the header, and `raw: true` appends the untouched API payload:
+Domain tools answer in short prose with the data age in the header, and `raw: true` appends the untouched API payload. A successful result sends that text once plus structured data where a tool has one; `structuredContent.message` is used on failures, not on success.
 
 ```text
 Vehicle My Car: telemetry/battery (data observed 12 min ago)
@@ -48,16 +48,16 @@ Average consumption: 20.1 kWh/100km
 
 ### 1. Try it offline, no Polestar credential
 
-The repository ships a sanitized captured dump, and the demo asserts real values through the full server, token flow included:
+The repository ships a sanitized captured dump under `test/fixtures/dump`, and the demo asserts real values through the full server, token flow included:
 
 ```sh
 npm install
 npm run build
-npm run demo-dump                       # runs the whole server in fixture mode, prints DUMP_OK
-POLESTAR_FIXTURES_DIR=.. npm start      # serve the sibling captured dump interactively
+npm run demo                               # offline demo against the shipped dump, prints DUMP_OK
+POLESTAR_FIXTURES_DIR=test/fixtures/dump npm start   # serve the shipped dump interactively
 ```
 
-Fixture mode needs a directory of captured responses laid out like `test/fixtures/dump`; the dump this project was built against sits one level up in the workspace. A dump without a token response fails with `AuthError: Token request failed (HTTP 404)`: fixture mode runs the real auth lifecycle rather than skipping it. A route with no fixture answers `NOT_FOUND`, deliberately distinct from `DATA_NOT_AVAILABLE`, so a missing fixture can never masquerade as "the car reports nothing".
+The shipped dump is synthetic and travels with the package, so the demo works after a plain checkout and after an install. A real capture can be replayed by pointing `POLESTAR_FIXTURES_DIR` at it; a dump without a token response fails with `AuthError: Token request failed (HTTP 404)`, because fixture mode runs the real auth lifecycle rather than skipping it. A route with no fixture answers `NOT_FOUND`, deliberately distinct from `DATA_NOT_AVAILABLE`, so a missing fixture can never masquerade as "the car reports nothing".
 
 ### 2. Connect your car
 
@@ -92,7 +92,7 @@ Credentials can also ride in the client's `env` block instead of the secrets fil
 
 ## The tools
 
-Naming is mechanical: API domain `target-soc` becomes tool `get_target_soc`. Every tool that reads a car takes an optional `vin`; omit it on a single-vehicle credential and that car is used, and with several cars the tool asks which one (MCP elicitation) and validates the answer before sending it. Third-party credentials may pass a `delegated_account_id` argument, checked against the operator's allowlist because the API silently accepts unknown delegated IDs.
+Naming is mechanical: API domain `target-soc` becomes tool `get_target_soc`. Every tool that reads a car takes an optional `vin`; omit it on a single-vehicle credential and that car is used, and with several cars the tool asks which one (MCP elicitation) and validates the answer before sending it. Argument names are strict: an unknown or misspelled argument is refused by name instead of being dropped. Third-party credentials may pass a `delegated_account_id` argument, checked against the operator's allowlist because the API silently accepts unknown delegated IDs.
 
 | Tool | What it answers |
 | --- | --- |
@@ -172,10 +172,10 @@ Three dials control what leaves your car and how it is named:
 
 ## HTTP mode
 
-Set `POLESTAR_HTTP_PORT=8420 npm start` and the same engine serves tools, resources, and prompts over stateless Streamable HTTP: each request is independent, while cache, budget, and history are shared. It binds `127.0.0.1` by default; binding any other address requires `POLESTAR_HTTP_TOKEN`, because a server that reads vehicle location must not sit unauthenticated on a shared network. Resources work in both modes. Subscriptions do not: a stateless request's surface is closed as its response ends, so a poller would be stopped before its first tick, and the server answers `resources/subscribe` with an error and advertises `subscribe: false` in the handshake rather than accepting one that can never fire. Use stdio for subscriptions.
+Set `POLESTAR_HTTP_PORT=8420 npm start` and the same engine serves tools, resources, and prompts over stateless Streamable HTTP: each request is independent, while cache, budget, and history are shared. It binds `127.0.0.1` by default; binding any other address requires `POLESTAR_HTTP_TOKEN`, because a server that reads vehicle location must not sit unauthenticated on a shared network. Browser cross-origin requests are refused unless the `Origin` matches the request host or appears in `POLESTAR_HTTP_ALLOWED_ORIGINS`; a forged `Host` is refused the same way. Resources work in both modes. Subscriptions do not: a stateless request's surface is closed as its response ends, so a poller would be stopped before its first tick, and the server answers `resources/subscribe` with an error and advertises `subscribe: false` in the handshake rather than accepting one that can never fire. Use stdio for subscriptions.
 
 <details>
-<summary><strong>Full configuration reference (27 variables)</strong></summary>
+<summary><strong>Full configuration reference (28 variables)</strong></summary>
 
 The server knows exactly which variables it reads and warns about unrecognized ones (suggesting the closest real name); with `POLESTAR_STRICT_ENV=1` a typo is fatal instead of a warning. A value that is present but unusable, a bad URL, a non-numeric timeout, an out-of-range port, fails fast with the fix in the message.
 
@@ -207,6 +207,7 @@ The server knows exactly which variables it reads and warns about unrecognized o
 | `POLESTAR_HTTP_PORT` | 0 (stdio) | 1 to 65535 switches to Streamable HTTP |
 | `POLESTAR_HTTP_HOST` | 127.0.0.1 | HTTP bind address |
 | `POLESTAR_HTTP_TOKEN` | unset | Bearer token for HTTP mode; required off loopback |
+| `POLESTAR_HTTP_ALLOWED_ORIGINS` | unset | Comma-separated absolute origins a browser client may call from; unset allows the request's own Host only |
 | `POLESTAR_STRICT_ENV` | off | `1` makes an unrecognized variable fatal |
 
 </details>
@@ -219,12 +220,16 @@ npm run build          # strict TypeScript, emits build/server.js
 npm test               # unit suites: token lifecycle, client, runtime, planner, config registry
 npm run smoke          # stdio end-to-end: registry, tools, resources, prompts, history
 npm run smoke-http     # Streamable HTTP end-to-end over plain POSTs
-npm run demo-dump      # stdio end-to-end against the real captured dump
+npm run demo           # offline demo against the shipped synthetic dump, prints DUMP_OK
+npm run demo-dump      # stdio end-to-end against the shipped dump; set POLESTAR_FIXTURES_DIR for a real capture
+npm run coverage       # unit suite with the lines 90, branches 80, functions 85 floors
 npm run check-secrets  # secret-hygiene check
+npm run check-version  # one version across package.json, server.json, README, CHANGELOG, release note
+npm run check-server-json  # MCP Registry metadata shape
 npm run typecheck      # types src, test, and scripts together
 ```
 
-Requires Node 20 or newer. The suite covers what is easy to get subtly wrong: token single-flight and expiry skew, envelope unwrapping and identity checks, VIN resolution and delegation, cache TTLs and stale-while-revalidate, retry and budget metering, the charge-window planner (including windows that wrap midnight), history dedup and session reconstruction, and the configuration registry.
+Requires Node 20.11 or newer. The suite covers what is easy to get subtly wrong: token single-flight and expiry skew, envelope unwrapping and identity checks, VIN resolution and delegation, cache TTLs and stale-while-revalidate, retry and budget metering, the charge-window planner (including windows that wrap midnight), history dedup and session reconstruction, and the configuration registry.
 
 Verification is CI, not a claim in this file: every check runs on each push and pull request, and [CONTRIBUTING.md](CONTRIBUTING.md) carries the full table with what each one proves. The architecture is in [docs/architecture.md](docs/architecture.md) and [docs/development.md](docs/development.md); the domain words the code uses are defined in [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -253,5 +258,7 @@ Every API error carries the `requestId` and `timestamp` Polestar support can loo
 ## Status
 
 The documented v1 API is read-only and this server is read-only with it: every tool carries `readOnlyHint`, and `POLESTAR_ENABLE_WRITES` registers nothing because Polestar publishes no v1 write endpoints. The app-side consumer API (car model details, render images) is deliberately not wired in either. Its GraphQL queries are unpublished and its refresh tokens rotate destructively, so wiring it would mean depending on a contract that can be revoked without notice.
+
+Distribution status: the npm package and the MCP Registry entry are prepared in this tree (the release workflow checks, packs and publishes on a version tag), but they are not published yet. Publishing is blocked on the owner's npm credentials and on npm name availability. Until then, run the server from a clone with `npm ci && npm run build`.
 
 This is a personal project for one owner's Polestar 2. It is not affiliated with or endorsed by Polestar.

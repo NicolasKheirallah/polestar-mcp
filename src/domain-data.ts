@@ -18,6 +18,21 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 const asNumber = (value: unknown): number | undefined => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
 const asString = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
 
+/**
+ * A number the live contract sometimes sends as a JSON string. Location is the
+ * measured case: `speed` and `altitude` arrive as `"45"` and `"12"`, and reading
+ * them as numbers alone turned a moving car into 0 km/h. Kept separate from
+ * `asNumber` so a payload shape change elsewhere is not silently coerced.
+ */
+const asNumeric = (value: unknown): number | undefined => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+};
+
 /** Current charge level, percent. */
 export function chargeLevelPct(battery: Payload): number | undefined {
   return asNumber(asRecord(battery)?.batteryChargeLevelPercentage);
@@ -116,13 +131,80 @@ export function odometerMeters(data: Payload): number | undefined {
   return asNumber(asRecord(data)?.odometerMeters);
 }
 
-/** When the cloud last heard from the car, epoch ms, the Availability timestamp. */
-export function observedAtMs(data: Payload): number | undefined {
+/** Deepest nesting the value-clock search walks: settings nest their clock under metadata. */
+const VALUE_CLOCK_MAX_DEPTH = 4;
+
+/** A protobuf timestamp object, or an epoch-millisecond string, as epoch ms. */
+const valueClockMs = (value: unknown): number | undefined => {
+  const seconds = epochSecondsMs(value);
+  if (seconds !== undefined) return seconds;
+  if (typeof value === 'string' && /^\d+$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+};
+
+/**
+ * The first `updatedAtTimestamp` below the payload's top level. Settings carry
+ * their own clock there (`ampLimit.updatedAtTimestamp`,
+ * `globalChargeTimer.metadata.updatedAtTimestamp`), and it is the value's time,
+ * not the cloud receive time the top-level `metaReceivedAt` records.
+ */
+function nestedUpdatedAtMs(node: unknown, depth: number): number | undefined {
+  if (node === null || typeof node !== 'object' || depth > VALUE_CLOCK_MAX_DEPTH) return undefined;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = nestedUpdatedAtMs(item, depth + 1);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  const record = node as Record<string, unknown>;
+  const own = valueClockMs(record.updatedAtTimestamp);
+  if (own !== undefined) return own;
+  for (const child of Object.values(record)) {
+    const found = nestedUpdatedAtMs(child, depth + 1);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * When the value itself was observed, epoch ms.
+ *
+ * Order matters and used to be wrong: the old reader took the top-level
+ * `timestamp` and then `metaReceivedAt`, so a charging setting changed 24 days
+ * before the capture printed as fresh because the cloud only just re-sent it.
+ * The value's own clocks come first, then the payload's sync clock, then the
+ * receive clock:
+ *
+ * 1. a nested `updatedAtTimestamp` (settings: `ampLimit`, both timers)
+ * 2. `targetSoc.timestamp` (the target value nests its clock)
+ * 3. the top-level `updatedAtTimestamp`
+ * 4. the top-level `timestamp.seconds`
+ * 5. `metaReceivedAt`, the cloud receive clock, which is still better than the
+ *    read clock a history record would otherwise store
+ */
+export function valueObservedAtMs(data: Payload): number | undefined {
   const record = asRecord(data);
   if (record === undefined) return undefined;
-  const ts = asRecord(record.timestamp);
-  const seconds = ts?.seconds;
-  if (typeof seconds === 'string' && /^\d+$/.test(seconds)) return Number(seconds) * 1000;
+
+  for (const [key, child] of Object.entries(record)) {
+    if (key === 'updatedAtTimestamp') continue;
+    const nested = nestedUpdatedAtMs(child, 1);
+    if (nested !== undefined) return nested;
+  }
+
+  const targetClock = epochSecondsMs(asRecord(record.targetSoc)?.timestamp);
+  if (targetClock !== undefined) return targetClock;
+
+  const updatedAt = valueClockMs(record.updatedAtTimestamp);
+  if (updatedAt !== undefined) return updatedAt;
+
+  const topLevel = epochSecondsMs(record.timestamp);
+  if (topLevel !== undefined) return topLevel;
+
   const meta = record.metaReceivedAt;
   if (typeof meta === 'string') {
     const parsed = Date.parse(meta);
@@ -131,14 +213,24 @@ export function observedAtMs(data: Payload): number | undefined {
   return undefined;
 }
 
+/** The observation time of a payload; same answer as {@link valueObservedAtMs}. */
+export function observedAtMs(data: Payload): number | undefined {
+  return valueObservedAtMs(data);
+}
+
 export interface Position {
   latitude?: number;
   longitude?: number;
+  altitude?: number;
   heading?: number;
   speedKmh?: number;
 }
 
-/** `telemetry/location` nests the coordinates under `coordinate`. */
+/**
+ * `telemetry/location` nests the coordinates under `coordinate`; speed and
+ * altitude are JSON strings in the live contract even though heading is a number,
+ * so the two string-encoded fields are read with the numeric-string tolerance.
+ */
 export function position(data: Payload): Position | undefined {
   const record = asRecord(data);
   const coord = asRecord(record?.coordinate);
@@ -146,10 +238,12 @@ export function position(data: Payload): Position | undefined {
   const out: Position = {};
   const lat = asNumber(coord.latitude);
   const lon = asNumber(coord.longitude);
+  const altitude = asNumeric(record?.altitude);
   const heading = asNumber(record?.heading);
-  const speed = asNumber(record?.speed);
+  const speed = asNumeric(record?.speed);
   if (lat !== undefined) out.latitude = lat;
   if (lon !== undefined) out.longitude = lon;
+  if (altitude !== undefined) out.altitude = altitude;
   if (heading !== undefined) out.heading = heading;
   if (speed !== undefined) out.speedKmh = speed;
   return out;
@@ -237,6 +331,27 @@ function openFields(record: Record<string, unknown>, include: (key: string) => b
   return out;
 }
 
+export type LockState = 'locked' | 'unlocked' | 'unknown';
+export type AlarmState = 'ok' | 'triggered' | 'unknown';
+
+const lockStateOf = (value: unknown): LockState => {
+  if (value === LOCK_STATUS_LOCKED) return 'locked';
+  if (value === 'LOCK_STATUS_UNLOCKED') return 'unlocked';
+  return 'unknown';
+};
+
+/**
+ * A triggered alarm is a fact; an unreported alarm is not an OK one. The
+ * distinction matters because the verdict sentence is read as a yes/no.
+ */
+const alarmStateOf = (value: unknown): AlarmState => {
+  if (typeof value !== 'string' || value === '') return 'unknown';
+  const upper = value.toUpperCase();
+  if (upper.includes('TRIGGERED')) return 'triggered';
+  if (upper.endsWith('_UNSPECIFIED')) return 'unknown';
+  return 'ok';
+};
+
 export interface ExteriorView {
   /** Every exterior field the car reports open, the charge flap included. */
   open: string[];
@@ -251,21 +366,48 @@ export interface ExteriorView {
    * other.
    */
   openSecurityRelevant: string[];
-  /** Central lock and tailgate lock both engaged. */
-  locked: boolean;
-  /** The raw lock status, for the label a summary prints. */
+  /**
+   * True only when both locks report locked, false when either reports unlocked,
+   * undefined when either is unreported. Absence must not read as "unlocked": the
+   * old boolean said a car with no `tailgateLock` was open when the car had simply
+   * not reported the field.
+   */
+  locked?: boolean | undefined;
+  lockState: LockState;
   centralLock: unknown;
+  tailgateLock: unknown;
+  /** Lock fields the car did not report, in the words the summaries use. */
+  unknownLocks: string[];
+  /** Lock fields the car reported not locked, in the words the summaries use. */
+  unlockedLocks: string[];
   alarm: unknown;
+  alarmState: AlarmState;
 }
 
 export function exteriorView(data: Payload): ExteriorView {
   const exterior = asRecord(data) ?? {};
+  const centralState = lockStateOf(exterior.centralLock);
+  const tailgateState = lockStateOf(exterior.tailgateLock);
+  const states = [
+    { name: spokenFieldName('centralLock'), state: centralState },
+    { name: spokenFieldName('tailgateLock'), state: tailgateState },
+  ];
+  const lockState: LockState = states.some((s) => s.state === 'unlocked')
+    ? 'unlocked'
+    : states.some((s) => s.state === 'unknown')
+      ? 'unknown'
+      : 'locked';
   return {
     open: openFields(exterior, () => true),
     openSecurityRelevant: openFields(exterior, (key) => key !== 'tankLid'),
-    locked: exterior.centralLock === LOCK_STATUS_LOCKED && exterior.tailgateLock === LOCK_STATUS_LOCKED,
+    ...(lockState === 'unknown' ? {} : { locked: lockState === 'locked' }),
+    lockState,
     centralLock: exterior.centralLock,
+    tailgateLock: exterior.tailgateLock,
+    unknownLocks: states.filter((s) => s.state === 'unknown').map((s) => s.name),
+    unlockedLocks: states.filter((s) => s.state === 'unlocked').map((s) => s.name),
     alarm: exterior.alarm,
+    alarmState: alarmStateOf(exterior.alarm),
   };
 }
 

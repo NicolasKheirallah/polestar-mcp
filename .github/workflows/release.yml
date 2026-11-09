@@ -1,0 +1,69 @@
+name: release
+# Tag-driven release: v0.3.0 publishes the npm package with provenance and then
+# the MCP Registry entry. Both publish steps are gated on repository secrets, so
+# a tag on a fork or a repository without credentials runs every check and then
+# reports that publishing is skipped. The actual publish is blocked on owner
+# credentials (NPM_TOKEN) and on npm name availability until the owner decides.
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run verify-fixtures
+      - run: npm test
+      - run: npm run coverage
+      - run: npm run smoke
+      - run: npm run smoke-bin
+      - run: npm run demo
+      - run: npm run check-secrets
+      - run: npm run check-tool-refs
+      - run: npm run check-version
+      - run: npm run check-server-json
+      - run: node docs/check-docs.mjs tools
+      - run: node docs/check-docs.mjs envvars
+      - run: node docs/check-docs.mjs links
+      - run: node docs/check-docs.mjs hygiene
+      - name: The tag must match the single version source
+        run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
+      - name: Publish to npm with provenance
+        if: env.NPM_TOKEN != ''
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Install mcp-publisher
+        if: env.NPM_TOKEN != ''
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+      - name: Authenticate to the MCP Registry with GitHub OIDC
+        if: env.NPM_TOKEN != ''
+        run: ./mcp-publisher login github-oidc
+      - name: Publish the server metadata to the MCP Registry
+        if: env.NPM_TOKEN != ''
+        run: ./mcp-publisher publish
+      - name: Create the GitHub release
+        if: env.NPM_TOKEN != ''
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Report the blocked publish
+        if: env.NPM_TOKEN == ''
+        run: |
+          echo "::notice::npm and MCP Registry publishing skipped: NPM_TOKEN is not configured. See docs/releases/README.md for the owner release checklist."

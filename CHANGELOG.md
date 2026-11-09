@@ -16,6 +16,23 @@ All notable changes to this project. The format follows
 - `UNKNOWN_DOMAIN`, a minted code for a Domain named to `get_history` that the registry
   does not have. `list_domains` is named in its hint, as for every minted code.
 
+- An offline demo that works from a checkout and from the packed package:
+  `npm run demo` (plain Node, no tsx, spawning `build/server.js` against the shipped
+  synthetic dump) and `npm run demo-dump` (the contributor variant, which now defaults to
+  `test/fixtures/dump` instead of the parent directory). The published `files` list now
+  carries the demo script and the synthetic dump, so the packaged README command is real.
+- A tag-driven release workflow with `npm publish --provenance` and an MCP Registry publish
+  step, plus `mcpName` in `package.json` and `server.json` in the current 2025-12-11
+  registry shape. Publishing is prepared but blocked on owner npm credentials and on npm
+  name availability; the workflow reports the skipped publish instead of failing the tag.
+- `scripts/check-version.mjs` and `scripts/validate-server-json.mjs`, wired into CI and
+  covered by `test/docs-gates.test.ts`.
+- CI jobs for a Node floor matrix at 20.11, 22 and 24, a pack-and-install smoke of the real
+  tarball, and a Docker build that checks the image runs as a non-root user with a
+  healthcheck. The `Dockerfile` gained `USER node`, a `HEALTHCHECK`, OCI labels and a
+  `.dockerignore`.
+- Coverage floors in `npm run coverage`: lines 90, branches 80, functions 85.
+
 ### Changed
 
 - Which vehicle a call is about, and how its domains are read, now come from one module
@@ -27,6 +44,31 @@ All notable changes to this project. The format follows
 - A `polestar://` resource read is now the same read as the `get_*` tool for that domain, so
   it carries the data age, the owner label and the VIN redaction rule it lacked, and a
   domain the car does not report reads the same through both surfaces.
+
+- The Node floor is now `>=20.11.0` because `scripts/capture.ts`,
+  `scripts/verify-fixtures.mjs` and `scripts/server-for-inspector.ts` use
+  `import.meta.dirname`; the README badge, getting started, development notes and the
+  v0.3.0 release note now match.
+- `docs/check-docs.mjs` links gate scans CONTRIBUTING, SECURITY, CHANGELOG,
+  `docs/releases/**` and README instead of only `docs/*.md`; the envvars gate reads every
+  `src` file with a digit-safe name pattern and checks README as well as getting started.
+- `SECURITY.md` states which surfaces `POLESTAR_REDACT_VIN` masks and names the three
+  exceptions: the resource URI identity, `raw: true`, and on-disk history paths.
+
+- **Breaking for clients that read `structuredContent.message`:** a successful result sends
+  its rendered text once in `content`, plus structured data in `structuredContent.data` where
+  a tool populates one. `structuredContent.message` is emitted only for failures, where it
+  differs from the text. Clients should read the content text or the structured data.
+  `list_vehicles` returns `{count, vehicles}` and the stdio smoke asserts the count matches.
+- Tool arguments are validated strictly: an unknown argument is now refused by name instead
+  of being dropped, so a misspelled `vin` no longer reads the default car in silence.
+- The 15 domain tool descriptions are short routing text again; `list_domains` remains the
+  endpoint and OAuth scope map. `docs/tools-reference.md` says so instead of claiming every
+  description embeds the route.
+- History answers state their clock and their span: `get_history` dates a line by the value
+  clock when recorded and shows a paging marker, the degradation report requires at least
+  5 samples over at least 7 days before calling the result an estimate, and charging sessions
+  label the with-gaps interval a span rather than a duration.
 
 ### Fixed
 
@@ -51,6 +93,12 @@ All notable changes to this project. The format follows
   closes, which is what the response teardown already did for the transport.
 - A stopped subscription poller left its targets in the map, so a restarted poller for the
   same URI was treated as still subscribed.
+
+- The README, getting started, development notes and release note no longer promise an
+  npm install or an offline demo that fails on a clean checkout. The release note uses the
+  repository build path until the package is published.
+- The 0.3.0 changelog no longer claims a logging notification the code never sends,
+  undefined G2 to G7 gate names, or that the smoke run exercises all 26 tools.
 
 ### Verification
 
@@ -87,7 +135,7 @@ authenticated calls.
   (`POLESTAR_HTTP_TOKEN`); refuses to bind a non-loopback interface without a token.
 - MCP protocol surface: server `instructions`, `outputSchema` on every tool with a
   structured result envelope, `readOnlyHint` annotations, resources with VIN completion and
-  subscriptions, prompts, logging notifications, graceful shutdown, `--help` / `--version`.
+  subscriptions, prompts, graceful shutdown, `--help` / `--version`.
 - An ambiguous VIN asks the client which vehicle to read through server-initiated
   elicitation, degrading to `AMBIGUOUS_VIN` when the client cannot be asked and
   `VIN_NOT_CHOSEN` when it declines.
@@ -134,9 +182,9 @@ authenticated calls.
 
 ### Verification
 
-Proven by the CI checks rather than restated here: build,
-G2 unit suites, G3 stdio smoke, G4 secret hygiene, G5 real-dump compatibility, G6 HTTP smoke,
-G7 typecheck plus fixture completeness plus coverage. The smoke runs exercise all 26
-registered tools, fixtures cover 15/15 domains with real response shapes, and the secrets
-gate also detects personal email, phone numbers, precise coordinates and an endpoint dump
-parked in the tree.
+Proven by the CI checks rather than restated here: typecheck, build, the unit suites, the
+stdio, HTTP and bin smokes, the offline demo, fixture completeness, secret hygiene and the
+documentation gates. The smoke run calls the 24 zero-argument tools plus `get_history`;
+`plan_cheapest_charge` is covered by the planner unit tests. Fixtures cover 15/15 domains with
+real response shapes, and the secrets gate also detects personal email, phone numbers,
+precise coordinates and an endpoint dump parked in the tree.

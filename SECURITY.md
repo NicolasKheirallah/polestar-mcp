@@ -23,11 +23,29 @@ threat model here is written in those terms.
 
 ## What redaction does and does not do
 
-`POLESTAR_REDACT_VIN=1` masks the VIN in rendered output and in the structured
-envelope that clients forward to the model, including the resource listings. It does
-not mask inside `raw: true`: that argument exists to return the upstream payload as
-the API sent it, and the payload carries the VIN as a field. If you pipe tool results
-into logs or a shared inbox, leave `raw` off.
+`POLESTAR_REDACT_VIN=1` masks the VIN in every surface a client forwards to the
+model: tool result text and the structured envelope, resource listing names and
+descriptions, completion values, and client-facing error messages. The masked form
+keeps the first three and last three characters, which is enough to tell two
+vehicles apart without carrying the identifier into a transcript.
+
+Three surfaces are deliberately not masked, and each is documented rather than an
+oversight:
+
+- **The resource URI identity** (`polestar://vehicle/<vin>/<kind>/<domain>`). The
+  URI is the address a client reads and subscribes to, and a masked URI would make
+  every listed resource unreadable and unsubscribable. The body and the listing name
+  of that resource are still masked; only the identity string is not.
+- **`raw: true`.** That argument exists to return the upstream payload exactly as
+  the API sent it, VIN included. Leave it off when piping results into logs or a
+  shared inbox.
+- **On-disk history paths.** A history directory is named by VIN so the operator can
+  find a store without a lookup. Those paths stay local and are never sent to a
+  client.
+
+If you need the identifier out of a local transcript too, keep `raw` off, leave
+`POLESTAR_REDACT_VIN=1`, and treat the history directory as the one remaining local
+artifact that names vehicles.
 
 ## Where credentials live
 

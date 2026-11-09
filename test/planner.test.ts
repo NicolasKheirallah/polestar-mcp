@@ -75,16 +75,17 @@ test('formatAge speaks relative time', () => {
   assert.equal(formatAge(now - 3 * 3_600_000, now), '3 h ago');
 });
 
-const HOURLY_PRICES = [
-  '2026-09-19T22:00:00Z',
-  '2026-09-19T23:00:00Z',
-  '2026-09-20T00:00:00Z',
-  '2026-09-20T01:00:00Z',
-].map((startsAt, i) => ({ startsAt, price: [0.9, 0.2, 0.1, 0.5][i]! }));
+const hourly = (startIso: string, prices: number[]) => {
+  const start = Date.parse(startIso);
+  return prices.map((price, index) => ({ startsAt: new Date(start + index * 3_600_000).toISOString(), price }));
+};
 
-test('planner picks the cheapest contiguous hours inside the window', () => {
+const localHours = (plan: { steps: { startsAt: string }[] }): number[] =>
+  plan.steps.map((step) => new Date(step.startsAt).getUTCHours());
+
+test('planner picks the cheapest adjacent hours and the schedule delivers the energy needed', () => {
   const plan = planCheapestCharge({
-    prices: HOURLY_PRICES,
+    prices: hourly('2026-09-20T00:00:00Z', [0.1, 0.5, 0.4, 0.3, 0.2, 0.6, 0.7]),
     socPct: 40,
     targetPct: 80,
     capacityKwh: 80,
@@ -95,46 +96,236 @@ test('planner picks the cheapest contiguous hours inside the window', () => {
   });
   assert.equal(plan.feasible, true);
   assert.equal(plan.energyNeededKwh, 32);
-  // cheapest contiguous 1h slots are 00:00 (0.1) and 23:00 (0.2); only 00:00–06:00 window includes 00:00
-  assert.ok(plan.steps.length >= 2);
-  assert.equal(plan.steps[0]!.price, 0.1);
+  assert.equal(plan.steps.length, 4);
+  assert.equal(plan.steps[0]!.startsAt, '2026-09-20T00:00:00.000Z');
+  assert.equal(plan.steps.reduce((total, step) => total + step.energyKwh, 0), 32, 'the steps must deliver the energy needed');
+  plan.steps.forEach((step, index) => {
+    const start = new Date(step.startsAt);
+    assert.equal(start.getUTCMinutes(), 0);
+    assert.equal(start.getUTCSeconds(), 0);
+    assert.equal(start.getUTCMilliseconds(), 0);
+    if (index > 0) assert.equal(Date.parse(step.startsAt), Date.parse(plan.steps[index - 1]!.endsAt), 'steps are adjacent in time');
+  });
+  assert.equal(plan.totalCost, 11.778);
+  assert.equal(plan.totalCost, Math.round(plan.steps.reduce((total, step) => total + step.cost, 0) * 1000) / 1000);
+  assert.equal(plan.totalGridEnergyKwh, 35.555);
+  assert.ok(plan.assumptions.some((line) => line.includes('90% AC efficiency')));
+  assert.ok(plan.assumptions.some((line) => line.includes("caller's currency per kWh")));
 });
 
-test('planner handles wrap-around windows (23→06) and reports assumptions', () => {
-  const plan = planCheapestCharge({
-    prices: HOURLY_PRICES,
+test('planner handles wrap-around windows and normalizes hours above 23', () => {
+  const wrap = planCheapestCharge({
+    prices: hourly('2026-09-19T22:00:00Z', [0.3, 0.2, 0.1, 0.4, 0.5, 0.6, 0.7, 0.8]),
     socPct: 40,
-    targetPct: 80,
+    targetPct: 60,
     capacityKwh: 80,
     powerKw: 10,
     windowStartHour: 23,
     windowEndHour: 6,
     nowMs: Date.parse('2026-09-19T12:00:00Z'),
   });
-  assert.equal(plan.feasible, true);
-  // 23:00 (0.2) and 00:00 (0.1) are the two cheapest in the wrapped window
-  const hours = plan.steps.map((s) => new Date(s.startsAt).getUTCHours());
-  assert.deepEqual(hours.slice(0, 2), [23, 0]); // ascending in time: 23:00 then 00:00
-  assert.ok(plan.assumptions.some((a) => a.includes('10.0 kW')));
+  assert.equal(wrap.feasible, true);
+  assert.deepEqual(localHours(wrap), [23, 0], 'a 23 to 6 window wraps midnight and stays adjacent');
+  assert.equal(wrap.steps[0]!.startsAt, '2026-09-19T23:00:00.000Z');
+
+  const lateStop = planCheapestCharge({
+    prices: hourly('2026-01-01T00:00:00Z', Array.from({ length: 72 }, () => 0.2)),
+    socPct: 50,
+    targetPct: 80,
+    capacityKwh: 80,
+    powerKw: 10,
+    windowStartHour: 22,
+    windowEndHour: 28,
+    nowMs: Date.parse('2026-01-01T12:00:00Z'),
+  });
+  assert.equal(lateStop.feasible, true);
+  assert.deepEqual(localHours(lateStop).slice(0, 3), [22, 23, 0], 'a stop hour of 28 is 04:00, not a truncated window');
 });
 
-test('planner falls back to cheapest individual hours when the window is too short', () => {
+test('planner starts its first slot on a whole hour, never on the call second', () => {
   const plan = planCheapestCharge({
-    prices: [
-      { startsAt: '2026-09-20T00:00:00Z', price: 0.1 },
-      { startsAt: '2026-09-20T01:00:00Z', price: 0.9 },
-      { startsAt: '2026-09-20T02:00:00Z', price: 0.2 },
-    ],
-    socPct: 0,
-    targetPct: 90,
-    capacityKwh: 100,
-    powerKw: 100, // 0.9h needed → 1h per ceil, but need 90 kWh across 3 hours of window
+    prices: hourly('2026-01-01T00:00:00Z', Array.from({ length: 48 }, () => 0.2)),
+    socPct: 50,
+    targetPct: 60,
+    capacityKwh: 80,
+    powerKw: 10,
     windowStartHour: 0,
-    windowEndHour: 3,
-    nowMs: Date.parse('2026-09-19T23:00:00Z'),
+    windowEndHour: 24,
+    nowMs: Date.parse('2026-01-01T12:00:55.678Z'),
   });
   assert.equal(plan.feasible, true);
-  assert.ok(plan.reason !== undefined || plan.steps.length > 0);
+  assert.ok(plan.steps.length > 0);
+  for (const step of plan.steps) {
+    const start = new Date(step.startsAt);
+    assert.equal(start.getUTCMinutes(), 0);
+    assert.equal(start.getUTCSeconds(), 0);
+    assert.equal(start.getUTCMilliseconds(), 0);
+  }
+  assert.ok(Date.parse(plan.steps[0]!.startsAt) >= Date.parse('2026-01-01T13:00:00Z'), 'the partial hour is not scheduled as if it were whole');
+});
+
+test('planner reports a shortfall instead of a feasible plan that cannot deliver', () => {
+  const plan = planCheapestCharge({
+    prices: hourly('2026-01-01T00:00:00Z', Array.from({ length: 48 }, () => 0.2)),
+    socPct: 30,
+    targetPct: 100,
+    capacityKwh: 80,
+    powerKw: 10,
+    windowStartHour: 0,
+    windowEndHour: 1,
+    nowMs: Date.parse('2026-01-01T00:00:00Z'),
+  });
+  assert.equal(plan.feasible, false, 'a plan that cannot reach the target is not feasible');
+  assert.match(String(plan.reason), /Shortfall 36 kWh/);
+  assert.match(String(plan.reason), /delivering at most 20 kWh/);
+  assert.equal(plan.steps.length, 0);
+});
+
+test('planner labels a cross-night fallback non-contiguous instead of calling the run contiguous', () => {
+  const start = Date.parse('2026-01-01T00:00:00Z');
+  const prices = Array.from({ length: 96 }, (_, index) => ({
+    startsAt: new Date(start + index * 3_600_000).toISOString(),
+    price: 0.3,
+  }));
+  const patch = (dayIso: string, hour: number, price: number): void => {
+    const at = Date.parse(dayIso) + hour * 3_600_000;
+    const entry = prices.find((slot) => Date.parse(slot.startsAt) === at);
+    if (entry !== undefined) entry.price = price;
+  };
+  for (const hour of [22, 23]) patch('2026-01-01T00:00:00Z', hour, 0.05);
+  for (const hour of [0, 1]) patch('2026-01-02T00:00:00Z', hour, 0.05);
+  for (const hour of [22, 23]) patch('2026-01-02T00:00:00Z', hour, 0.1);
+
+  const plan = planCheapestCharge({
+    prices,
+    socPct: 0,
+    targetPct: 75,
+    capacityKwh: 80,
+    powerKw: 10,
+    windowStartHour: 22,
+    windowEndHour: 2,
+    nowMs: start,
+  });
+  assert.equal(plan.feasible, true);
+  assert.match(String(plan.reason), /not contiguous/);
+  assert.ok(plan.assumptions.some((line) => line.includes('not contiguous')));
+  const gaps = plan.steps.slice(1).map((step, index) => Date.parse(step.startsAt) - Date.parse(plan.steps[index]!.endsAt));
+  assert.ok(Math.max(...gaps) > 3_600_000, `expected a real time gap inside the plan, got ${gaps.join(', ')}`);
+  assert.equal(Math.min(...plan.steps.map((step) => step.price)), 0.05);
+});
+
+test('planner refuses a plan whose scheduled hours have no supplied price', () => {
+  // 24 prices, none of them inside either charge window in the next 48h.
+  const prices = [
+    ...hourly('2026-01-01T08:00:00Z', Array.from({ length: 12 }, () => 0.2)),
+    ...hourly('2026-01-02T08:00:00Z', Array.from({ length: 12 }, () => 0.2)),
+  ];
+  const plan = planCheapestCharge({
+    prices,
+    socPct: 50,
+    targetPct: 60,
+    capacityKwh: 80,
+    powerKw: 10,
+    windowStartHour: 0,
+    windowEndHour: 6,
+    nowMs: Date.parse('2026-01-01T00:00:00Z'),
+  });
+  assert.equal(plan.feasible, false, '24 out-of-window prices must not produce a priced-looking plan');
+  assert.match(String(plan.reason), /Price data does not cover the scheduled hours/);
+  assert.equal(plan.steps.length, 0);
+
+  const empty = planCheapestCharge({
+    prices: [],
+    socPct: 50,
+    targetPct: 60,
+    capacityKwh: 80,
+    powerKw: 10,
+    windowStartHour: 0,
+    windowEndHour: 6,
+    nowMs: Date.parse('2026-01-01T00:00:00Z'),
+  });
+  assert.equal(empty.feasible, false);
+  assert.equal(empty.steps.length, 0);
+});
+
+test('planner keeps negative and zero totals and prices only the scheduled steps', () => {
+  const negative = planCheapestCharge({
+    prices: hourly('2026-01-01T00:00:00Z', [-0.1, -0.1, -0.1, -0.1, -0.1, -0.1]),
+    socPct: 50,
+    targetPct: 80,
+    capacityKwh: 80,
+    powerKw: 10,
+    windowStartHour: 0,
+    windowEndHour: 6,
+    nowMs: Date.parse('2026-01-01T00:00:00Z'),
+  });
+  assert.equal(negative.feasible, true);
+  assert.ok(negative.totalCost !== undefined && negative.totalCost < 0, `negative prices must keep a negative cost, got ${negative.totalCost}`);
+  assert.equal(negative.totalCost, Math.round(negative.steps.reduce((total, step) => total + step.cost, 0) * 1000) / 1000);
+
+  const zero = planCheapestCharge({
+    prices: hourly('2026-01-01T00:00:00Z', [0, 0, 0, 0, 0, 0]),
+    socPct: 50,
+    targetPct: 80,
+    capacityKwh: 80,
+    powerKw: 10,
+    windowStartHour: 0,
+    windowEndHour: 6,
+    nowMs: Date.parse('2026-01-01T00:00:00Z'),
+  });
+  assert.equal(zero.feasible, true);
+  assert.equal(zero.totalCost, 0, 'a zero price is a real cost, not a missing one');
+});
+
+test('planner splits the last hour at the schedule instead of spreading energy evenly', () => {
+  const plan = planCheapestCharge({
+    prices: hourly('2026-01-01T00:00:00Z', [0.2, 0.1, 0.3, 0.4, 0.5, 0.6]),
+    socPct: 0,
+    targetPct: 20.7,
+    capacityKwh: 100,
+    powerKw: 13.8,
+    windowStartHour: 0,
+    windowEndHour: 6,
+    nowMs: Date.parse('2026-01-01T00:00:00Z'),
+  });
+  assert.equal(plan.feasible, true);
+  assert.deepEqual(plan.steps.map((step) => step.energyKwh), [13.8, 6.9], 'a full hour then the remaining half hour');
+  assert.equal(plan.totalCost, 3.834);
+  assert.equal(plan.totalCost, Math.round(plan.steps.reduce((total, step) => total + step.cost, 0) * 1000) / 1000);
+});
+
+test('planner returns an empty feasible plan when the target is already reached', () => {
+  const plan = planCheapestCharge({
+    prices: hourly('2026-01-01T00:00:00Z', [0.2]),
+    socPct: 80,
+    targetPct: 80,
+    capacityKwh: 80,
+    powerKw: 10,
+    windowStartHour: 0,
+    windowEndHour: 6,
+    nowMs: Date.parse('2026-01-01T00:00:00Z'),
+  });
+  assert.equal(plan.feasible, true);
+  assert.equal(plan.steps.length, 0);
+  assert.match(String(plan.reason), /already reached/);
+});
+
+test('planner refuses inputs it cannot trust', () => {
+  const base = {
+    prices: hourly('2026-01-01T00:00:00Z', [0.2]),
+    socPct: 50,
+    targetPct: 80,
+    capacityKwh: 80,
+    powerKw: 10,
+    windowStartHour: 0,
+    windowEndHour: 6,
+    nowMs: Date.parse('2026-01-01T00:00:00Z'),
+  };
+  assert.match(String(planCheapestCharge({ ...base, capacityKwh: 0 }).reason), /Pack capacity/);
+  assert.match(String(planCheapestCharge({ ...base, powerKw: 0 }).reason), /Charging power/);
+  assert.match(String(planCheapestCharge({ ...base, socPct: 120 }).reason), /outside 0 to 100/);
+  assert.match(String(planCheapestCharge({ ...base, targetPct: -1 }).reason), /outside 0 to 100/);
+  assert.match(String(planCheapestCharge({ ...base, efficiency: 1.5 }).reason), /efficiency/);
 });
 
 test('a charging status is only active when it ends in _CHARGING', () => {

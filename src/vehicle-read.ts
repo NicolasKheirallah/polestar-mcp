@@ -78,20 +78,38 @@ export async function resolveVinOrAsk(
     return { vin: await deps.client.resolveVin(vinInput) };
   } catch (err) {
     const ambiguous = (err as PolestarApiError)?.code === 'AMBIGUOUS_VIN';
-    if (!ambiguous || ctx?.mcpReq?.elicitInput === undefined) throw err;
-    const answer = acceptedContent<{ vin?: string }>(ctx.mcpReq.inputResponses, requestKey);
+    if (!ambiguous) throw err;
+
+    const answer = acceptedContent<{ vin?: string }>(ctx?.mcpReq?.inputResponses, requestKey);
     if (answer?.vin !== undefined) {
       // Client input is untrusted: resolveVin still validates it.
       return { vin: await deps.client.resolveVin(answer.vin) };
     }
-    const vins = await deps.client.vehicles();
+
+    const askable = ctx?.mcpReq?.elicitInput;
+    // A caller that cannot be asked gets the original error unless masking needs
+    // a fresh sentence built from the visible vehicle list.
+    if (askable === undefined && !deps.redactVin) throw err;
+
+    let vehicles: string[];
+    try {
+      vehicles = await deps.client.vehicles();
+    } catch {
+      throw err;
+    }
+    const choices = vehicles.map((vin) => maskVin(vin, deps.redactVin));
+    const ambiguousMessage = `This credential can see ${vehicles.length} vehicles: ${choices.join(', ')}. Pass an explicit vin.`;
+    if (askable === undefined) {
+      throw new PolestarApiError('AMBIGUOUS_VIN', ambiguousMessage, 400);
+    }
+
     let elicited: { action?: string; content?: Record<string, unknown> } | undefined;
     try {
-      elicited = await ctx.mcpReq.elicitInput({
-        message: `This credential can see ${vins.length} vehicles. Which one?`,
+      elicited = await askable({
+        message: `This credential can see ${vehicles.length} vehicles: ${choices.join(', ')}. Which one?`,
         requestedSchema: {
           type: 'object',
-          properties: { vin: { type: 'string', enum: vins, description: 'Choose the vehicle to read.' } },
+          properties: { vin: { type: 'string', enum: choices, description: 'Choose the vehicle to read.' } },
           required: ['vin'],
         },
       });
@@ -103,12 +121,21 @@ export async function resolveVinOrAsk(
       throw err;
     }
     const chosen = elicited?.action === 'accept' ? elicited.content?.vin : undefined;
-    if (typeof chosen === 'string') return { vin: await deps.client.resolveVin(chosen) };
-    throw new PolestarApiError(
-      'VIN_NOT_CHOSEN',
-      `No vehicle was chosen. This credential can see: ${vins.join(', ')}`,
-      400,
-    );
+    if (typeof chosen === 'string') {
+      // With redaction on, the enum carries masked identifiers, so the answer is
+      // mapped back to the one real VIN it names before resolveVin validates it.
+      const matches = vehicles.filter((vin) => maskVin(vin, deps.redactVin) === chosen);
+      if (matches.length === 1) return { vin: await deps.client.resolveVin(matches[0]) };
+      if (matches.length > 1) {
+        throw new PolestarApiError(
+          'AMBIGUOUS_VIN',
+          `The choice ${JSON.stringify(chosen)} matches ${matches.length} vehicles; pass an explicit vin.`,
+          400,
+        );
+      }
+      return { vin: await deps.client.resolveVin(chosen) };
+    }
+    throw new PolestarApiError('VIN_NOT_CHOSEN', `No vehicle was chosen. This credential can see: ${choices.join(', ')}`, 400);
   }
 }
 
@@ -151,10 +178,43 @@ export async function vehicleFor(
  * a caller reading two tools could not tell whether they disagreed. A tool whose
  * consequence is worth naming adds it as a second sentence; the fact itself is
  * stated here, in the wording docs/tools-reference.md documents.
+ *
+ * Absence is a successful answer, but it is not data: the envelope carries
+ * `data.reported: false` and the `DATA_NOT_AVAILABLE` code so a structured consumer
+ * can tell "the car reports nothing" from a value.
  */
 export function noData(vehicle: VehicleScope, domain: DomainTarget, consequence?: string): ToolResult {
   const sentence = `No ${domain.name} data is available for vehicle ${vehicle.label} (the API returned DATA_NOT_AVAILABLE, this vehicle does not report this domain).`;
-  return text(consequence === undefined ? sentence : `${sentence} ${consequence}`);
+  const result = text(consequence === undefined ? sentence : `${sentence} ${consequence}`);
+  return withAbsenceEnvelope(result);
+}
+
+/** One Domain's absence marked in the structured half of the result. */
+function withAbsenceEnvelope(result: ToolResult): ToolResult {
+  return {
+    ...result,
+    structuredContent: {
+      ...result.structuredContent,
+      code: 'DATA_NOT_AVAILABLE',
+      data: { reported: false },
+    },
+  };
+}
+
+/**
+ * The answer for an aggregate whose constituent Domains did not report.
+ *
+ * `noData` states one Domain's absence, which reads as "no problem found" when a
+ * verdict tool answers from it: `is_car_secure` printed "No exterior data is
+ * available" with `ok: true`, so a model could take a missing reading as a passed
+ * check. This sentence starts from unknown and never from yes, no, or nothing.
+ */
+export function unknownData(vehicle: VehicleScope, domains: readonly DomainTarget[], consequence?: string): ToolResult {
+  const names = domains.map((domain) => domain.name);
+  const subject = names.length === 1 ? `${names[0]} data` : `data for ${names.join(', ')}`;
+  const sentence = `Unknown, not reported: vehicle ${vehicle.label} does not report ${subject} (the API returned DATA_NOT_AVAILABLE, this vehicle does not report this domain).`;
+  const result = text(consequence === undefined ? sentence : `${sentence} ${consequence}`);
+  return withAbsenceEnvelope(result);
 }
 
 /**
@@ -222,13 +282,17 @@ export async function readDomain(
   try {
     data = await vehicle.read(domain);
   } catch (err) {
-    return {
-      ok: false,
-      result: errorResult(
-        err,
-        (err as PolestarApiError)?.httpStatus === 403 ? `this domain needs the OAuth scope \`${scope}\` on the credential` : undefined,
-      ),
-    };
+    const failure = err as PolestarApiError;
+    // A 403 is not automatically a missing scope: the Data Portal also answers
+    // 403 for a VIN this credential cannot see and for a client-id mismatch, and
+    // both of those have their own code-specific hint. The scope override used
+    // to replace them, sending the operator to POLESTAR_SCOPES for an
+    // authorization problem that setting cannot fix.
+    const hasOwn403Hint = failure?.code === 'AUTHZ_CLIENT_ID_MISMATCH' || failure?.code === 'AUTHZ_VIN_UNAUTHORIZED';
+    const scopeHint = failure?.httpStatus === 403 && !hasOwn403Hint
+      ? `this domain needs the OAuth scope \`${scope}\` on the credential`
+      : undefined;
+    return { ok: false, result: errorResult(err, scopeHint) };
   }
   // A car that reports nothing is a normal answer, not a failure: the reading comes
   // back ok, carrying the shared absence sentence rather than an error.

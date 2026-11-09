@@ -9,8 +9,12 @@ export interface TokenProviderOptions {
   now?: () => number;
 }
 
-/** Refresh tokens this long before their advertised expiry. */
-const EXPIRY_SKEW_MS = 300_000;
+/**
+ * Refresh tokens this long before their advertised expiry. Exported because
+ * polestar_status reports the life the provider will actually use, which is the
+ * advertised expiry minus this skew.
+ */
+export const EXPIRY_SKEW_MS = 300_000;
 
 interface CachedToken {
   token: string;
@@ -135,8 +139,19 @@ export class TokenProvider {
     }
 
     const tok = parsed as { accessToken?: unknown; expiresIn?: unknown; tokenType?: unknown };
-    if (typeof tok.accessToken !== 'string' || typeof tok.expiresIn !== 'number') {
-      throw new AuthError(`Token endpoint response is missing accessToken/expiresIn (HTTP ${res.status}).`, res.status);
+    if (typeof tok.accessToken !== 'string') {
+      throw new AuthError(`Token endpoint response is missing accessToken (HTTP ${res.status}).`, res.status);
+    }
+    // expiresIn is the lifetime in seconds. A value that is not a finite positive
+    // number would put the cached expiry at or before now (or at NaN, which is
+    // never trusted), so every later call would re-request a token: one dishonest
+    // response became a token storm against the same endpoint.
+    if (typeof tok.expiresIn !== 'number' || !Number.isFinite(tok.expiresIn) || tok.expiresIn <= 0) {
+      throw new AuthError(
+        `Token endpoint returned an invalid expiresIn ${String(tok.expiresIn)}; ` +
+          `expected a positive number of seconds (HTTP ${res.status}).`,
+        res.status,
+      );
     }
 
     // The API answers `tokenType: "Bearer"`; honour anything else rather than

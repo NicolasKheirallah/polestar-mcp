@@ -12,7 +12,7 @@ Because the API allows only 10,000 calls per client per day, the server manages 
 
 ## What you need
 
-- Node.js 20 or newer (`node --version` to check).
+- Node.js 20.11 or newer (`node --version` to check).
 - An MCP client, that is, an app that can connect to MCP servers.
 - One of:
   - a **Polestar Data Portal credential** (for live data), or
@@ -107,6 +107,7 @@ The server knows exactly which `POLESTAR_*` variables exist. When you set one it
 | `POLESTAR_HTTP_PORT` | 0 (stdio) | 1 to 65535 serves the same surface over Streamable HTTP instead of stdio |
 | `POLESTAR_HTTP_HOST` | 127.0.0.1 | HTTP bind address |
 | `POLESTAR_HTTP_TOKEN` | unset | Bearer token for HTTP mode; required when binding anything but loopback |
+| `POLESTAR_HTTP_ALLOWED_ORIGINS` | unset | Comma-separated absolute origins accepted in HTTP mode, for example `https://app.example.com`. Unset allows the request Host only |
 | `POLESTAR_STRICT_ENV` | off | `1` (or `true`, `on`) makes an unrecognized variable fatal |
 
 ## First calls
@@ -133,21 +134,24 @@ Three privacy dials are built in: `POLESTAR_VEHICLE_LABELS` gives your cars frie
 
 ## HTTP mode
 
-Set `POLESTAR_HTTP_PORT` (for example 8420) and the server serves the same tools, resources, and prompts over stateless Streamable HTTP instead of stdio. It binds `127.0.0.1` by default; binding any other address requires `POLESTAR_HTTP_TOKEN`, because the server reads vehicle location and an unauthenticated network listener would be a real risk. Subscriptions remain a stdio feature.
+Set `POLESTAR_HTTP_PORT` (for example 8420) and the server serves the same tools, resources, and prompts over stateless Streamable HTTP instead of stdio. It binds `127.0.0.1` by default; binding any other address requires `POLESTAR_HTTP_TOKEN`, because the server reads vehicle location and an unauthenticated network listener would be a real risk. A browser `Origin` is accepted only when it matches the request host or is listed in `POLESTAR_HTTP_ALLOWED_ORIGINS`, and a forged `Host` is refused. Subscriptions remain a stdio feature.
 
 ## Trying it without a Polestar credential
 
-Fixture mode answers every tool call from a directory of captured JSON responses instead of the network. It still runs the normal token flow against a captured token response, so what you see is what live use looks like, just with recorded data. The captured dump sits one level above the project, so from inside `polestar-mcp` you can start it like this:
+Fixture mode answers every tool call from a directory of captured JSON responses instead of the network. It still runs the normal token flow against a captured token response, so what you see is what live use looks like, just with recorded data. The repository ships a synthetic dump under `test/fixtures/dump`, so from inside `polestar-mcp` you can start it like this:
 
 ```sh
-POLESTAR_FIXTURES_DIR=.. npm start
+POLESTAR_FIXTURES_DIR=test/fixtures/dump npm start
 ```
 
-or run the scripted demo, which asserts real values from that dump and prints `DUMP_OK`:
+or run the scripted demo, which asserts real values from the shipped dump and prints `DUMP_OK`:
 
 ```sh
+npm run demo
 npm run demo-dump
 ```
+
+Both commands work after a plain checkout and in the packed package. Point `POLESTAR_FIXTURES_DIR` at a captured dump to replay your own data instead.
 
 A dump without a token response fails with `AuthError: Token request failed (HTTP 404)`. That is intentional: the server does not silently skip authentication in fixture mode.
 

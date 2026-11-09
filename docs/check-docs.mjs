@@ -22,11 +22,38 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const DOCS_DIR = path.resolve(ROOT, 'docs');
 
-const DOC_FILES = () =>
-  readdirSync(DOCS_DIR)
-    .filter((f) => f.endsWith('.md'))
-    .map((f) => path.join(DOCS_DIR, f))
-    .concat(path.join(ROOT, 'README.md'));
+/** Every markdown document a user or reviewer can read, not just docs/*.md. */
+function markdownFallback() {
+  const files = [];
+  for (const rel of ['README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'CHANGELOG.md', 'AGENTS.md']) {
+    if (existsSync(path.join(ROOT, rel))) files.push(path.join(ROOT, rel));
+  }
+  const walk = (dir) => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && entry.name.endsWith('.md')) files.push(full);
+    }
+  };
+  walk(DOCS_DIR);
+  return files;
+}
+
+const DOC_FILES = () => {
+  let listed;
+  try {
+    listed = execSync('git ls-files --cached --others --exclude-standard -- "*.md"', { cwd: ROOT, encoding: 'utf8' })
+      .split('\n')
+      .filter(Boolean);
+  } catch {
+    // Not a checkout (a tarball, a container): use the known documents instead.
+    return markdownFallback();
+  }
+  const files = listed.map((rel) => path.join(ROOT, rel)).filter((file) => existsSync(file));
+  if (files.length < 5) fail(`LINKS_SCOPE_SUSPECT: only ${files.length} markdown files matched, the filters are wrong`);
+  return files;
+};
 
 /**
  * Files the writing rules apply to: everything tracked, not just the docs.
@@ -192,18 +219,37 @@ function checkBuzzwords() {
   console.log('HYGIENE_BUZZWORDS_CLEAN');
 }
 
-// envvars: every POLESTAR_* variable in src/ is documented
+// envvars: every POLESTAR_* variable read anywhere in src/ is documented.
+// The name pattern allows digits (POLESTAR_M2M_TOKEN_ENDPOINT), which a
+// [A-Z_]+ pattern silently truncates to POLESTAR_M and can never fail on.
 function checkEnvVars() {
   const names = new Set();
-  for (const f of ['src/config.ts', 'src/server.ts']) {
-    const text = readFileSync(path.join(ROOT, f), 'utf8');
-    for (const m of text.matchAll(/POLESTAR_[A-Z_]+/g)) names.add(m[0]);
-  }
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== 'node_modules') walk(full);
+      } else if (entry.name.endsWith('.ts')) {
+        const text = readFileSync(full, 'utf8');
+        for (const m of text.matchAll(/POLESTAR_[A-Z0-9][A-Z0-9_]*/g)) names.add(m[0]);
+      }
+    }
+  };
+  walk(path.join(ROOT, 'src'));
   if (names.size === 0) fail('ENVVARS_CHECK_FAILED: no POLESTAR_* variables found in src/');
-  const doc = readFileSync(path.join(DOCS_DIR, 'getting-started.md'), 'utf8');
-  const missing = [...names].filter((n) => !doc.includes(n));
-  if (missing.length > 0) fail(`ENVVARS_CHECK_FAILED: not documented: ${missing.join(', ')}`);
-  console.log('DOCS_ENVVARS_OK');
+
+  const docs = ['docs/getting-started.md', 'README.md'].map((rel) => ({
+    rel,
+    text: readFileSync(path.join(ROOT, rel), 'utf8'),
+  }));
+  const missing = [];
+  for (const name of [...names].sort()) {
+    for (const doc of docs) {
+      if (!doc.text.includes(name)) missing.push(`${name} in ${doc.rel}`);
+    }
+  }
+  if (missing.length > 0) fail(`ENVVARS_CHECK_FAILED: not documented:\n  ${missing.join('\n  ')}`);
+  console.log(`DOCS_ENVVARS_OK variables=${names.size} docs=${docs.length}`);
 }
 
 

@@ -8,7 +8,7 @@ export const vinArg = {
     .string()
     .optional()
     .describe(
-      'Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.',
+      'Vehicle Identification Number; omit it when the credential sees exactly one vehicle.',
     ),
 };
 
@@ -35,7 +35,7 @@ export const rawArg = {
     .boolean()
     .optional()
     .describe(
-      'Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.',
+      'Return the raw API payload too. It carries the VIN even when POLESTAR_REDACT_VIN is on.',
     ),
 };
 
@@ -44,7 +44,7 @@ export const delegatedAccountArg = {
   delegated_account_id: z
     .string()
     .optional()
-    .describe('Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.'),
+    .describe('Third-party credentials only: read this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.'),
 };
 
 export interface ToolDeps {
@@ -60,25 +60,62 @@ export interface ToolDeps {
 }
 
 /**
- * The one output envelope every tool declares. With `outputSchema` set the SDK
- * validates each result against it, so "this tool returns text a model has to
- * parse" becomes a checked contract: clients branch on `ok` and read `data`
- * structurally, and a result that drifts from the schema fails loudly instead
- * of quietly changing shape under every consumer. `message` repeats the text
- * block, so agents that only read content lose nothing.
+ * The one output envelope every tool declares.
+ *
+ * With `outputSchema` set the SDK validates each result against it, so "this tool
+ * returns text a model has to parse" becomes a checked contract: clients branch on
+ * `ok` and read `data` structurally, and a result that drifts from the schema
+ * fails loudly instead of quietly changing shape under every consumer.
+ *
+ * The shape is shared by every tool and repeated in `tools/list` once per tool,
+ * so it stays compact on purpose. Field descriptions are absent: this schema
+ * measured 1,009 bytes with them and 401 without, repeated once per tool. The
+ * contract is this schema plus the comment on each field below.
+ *
+ * `message` is sent only when it is not the content text. A success already
+ * carries its text in the content block, so repeating it there doubled every
+ * payload; a failure keeps a `message` because its content block appends the one
+ * hint, and machine clients want the refusal without the advice attached.
+ *
+ * `data` is the payload contract. A tool whose result carries a machine-readable
+ * payload attaches it with `withData()` and owns that payload's shape; a tool
+ * with nothing structured to say omits the field rather than sending an empty
+ * one. The shape is not frozen into JSON Schema here: a per-tool schema would be
+ * repeated in `tools/list` for every tool and undo the saving this shared shape
+ * exists for, so the tool owns the shape and its tests hold it.
  */
 export const resultShape = {
-  ok: z.boolean().describe('False when the call produced no data.'),
-  message: z.string().describe('Result text, identical to the content block.'),
-  tool: z.string().optional().describe('Tool that produced this result.'),
-  vin: z.string().optional().describe('Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.'),
-  data: z.unknown().optional().describe('Structured payload; shape documented per tool.'),
-  ageSeconds: z.number().nonnegative().optional().describe('Staleness of the underlying telemetry.'),
-  code: z.string().optional().describe('Machine-readable error code when ok is false.'),
-  httpStatus: z.number().optional().describe('Upstream HTTP status when ok is false.'),
-  requestId: z.string().optional().describe('Upstream request id, the handle support needs.'),
-  hint: z.string().optional().describe('Actionable guidance when ok is false.'),
+  /** False when the call produced no data. */
+  ok: z.boolean(),
+  /** The refusal text when it differs from the content block; omitted on success. */
+  message: z.string().optional(),
+  /** Tool that produced this result. */
+  tool: z.string().optional(),
+  /** Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on. */
+  vin: z.string().optional(),
+  /** Documented payload; shape belongs to the tool. Omitted when there is none. */
+  data: z.unknown().optional(),
+  /** Staleness of the underlying telemetry. */
+  ageSeconds: z.number().nonnegative().optional(),
+  /** Machine-readable error code when ok is false. */
+  code: z.string().optional(),
+  /** Upstream HTTP status when ok is false. */
+  httpStatus: z.number().optional(),
+  /** Upstream request id, the handle support needs, only when upstream sent one. */
+  requestId: z.string().optional(),
+  /** Actionable guidance when ok is false, sent once as a field. */
+  hint: z.string().optional(),
 };
+
+/**
+ * `resultShape` as the SDK takes it. Every tool registers this one value, which
+ * is what makes the envelope identical across the surface instead of copied
+ * twenty-six times with a chance to drift.
+ */
+export const resultSchema = z.object(resultShape);
+
+/** A payload a tool documents for its `data` field. */
+export type ToolData = Record<string, unknown>;
 
 /** Standard text content wrapper, carrying the matching structured envelope. */
 export function text(
@@ -87,8 +124,24 @@ export function text(
 ): ToolResult {
   return {
     content: [{ type: 'text', text: content }],
-    structuredContent: { ok: true, message: content, ...extra },
+    structuredContent: { ok: true, ...extra },
   };
+}
+
+/**
+ * Attach a documented payload to a successful result.
+ *
+ * `text(content, { data })` can attach a payload too, but a tool that promises
+ * one in its description should say so at the call site, and a reader should not
+ * have to check whether the field was spelled right. This is that helper; the
+ * shape is the tool's own and is documented next to the tool.
+ */
+export function withData(
+  content: string,
+  data: ToolData,
+  extra?: Partial<{ vin: string; ageSeconds: number; tool: string }>,
+): ToolResult {
+  return text(content, { ...extra, data });
 }
 
 // A type alias, not an interface: the SDK's callback result carries an index
@@ -109,18 +162,18 @@ const MINTED_HINTS: Record<MintedCode, string> = {
   AMBIGUOUS_VIN: 'This credential can see more than one vehicle and none was named. Pass a vin, or call list_vehicles first.',
   VIN_NOT_CHOSEN: 'No vehicle was chosen when the client was asked. Name a vin from list_vehicles and call again.',
   NO_VEHICLES: 'The credential authorizes no vehicle at all; check the Data Portal sharing setup rather than retrying.',
-  VIN_MISMATCH: 'The response was labelled a different vehicle than the one asked for, so it was not shown. Report the requestId; do not retry against a different car.',
-  DOMAIN_MISMATCH: 'The response was labelled a different domain than the one asked for, so it was not shown. Report the requestId.',
+  VIN_MISMATCH: 'The response was labelled a different vehicle than the one asked for, so it was not shown. Report the code and the tool you called; do not retry against a different car.',
+  DOMAIN_MISMATCH: 'The response was labelled a different domain than the one asked for, so it was not shown. Report the code and the tool you called.',
   UNKNOWN_DOMAIN: 'That Domain is not in the registry. list_domains enumerates every one as kind/name.',
   DELEGATION_NOT_ALLOWED: 'List the account in POLESTAR_DELEGATED_ACCOUNT_IDS to let callers switch to it; the API does not reject an unknown delegation, so this server checks it.',
   LOCATION_DISALLOWED: 'Position is disabled by POLESTAR_ALLOW_LOCATION=false and the vehicle was never queried. Enable it only at the owner\u2019s request.',
-  BAD_RESPONSE: 'The API returned an unexpected body; retry once, then report the requestId.',
+  BAD_RESPONSE: 'The API returned an unexpected body; retry once, then report the code and the tool you called.',
   AUTH_ERROR: 'The token endpoint refused the credential. Check POLESTAR_CLIENT_ID and POLESTAR_CLIENT_SECRET, and whether the secret was rotated.',
   TRANSPORT_TIMEOUT: 'The request did not complete in time; the API can be slow, retry once.',
   TRANSPORT_NETWORK: 'No route to the API; check connectivity before retrying.',
   RATE_LIMIT_EXCEEDED: 'The daily call budget is spent; retry after the reset reported by polestar_status.',
   RATE_LIMIT_MINUTE: 'The API also allows only 100 requests/minute. The server waits this out on its own; if you see it, slow the polling rate or lower POLESTAR_BUDGET_PER_MINUTE.',
-  INTERNAL_ERROR: 'Something failed inside this server rather than upstream. Report the requestId and the tool you called.',
+  INTERNAL_ERROR: 'Something failed inside this server rather than upstream. Report the code and the tool you called.',
 };
 
 /**
@@ -154,22 +207,33 @@ export function describeError(err: unknown): string {
  * code, status, requestId and the advice for that code. Returning an error as
  * ordinary text makes the model weigh it the same as data, and the requestId is
  * the only handle Polestar support acts on, so it belongs in a field.
+ *
+ * The hint is said twice on purpose, once in the text a model reads and once in
+ * the field a client branches on. It used to be said three times because
+ * `message` was the whole content block, hint included; `message` is the refusal
+ * alone now. A hint may name the requestId only when the failure actually carries
+ * one: `INVALID_VIN` and the other local refusals have no upstream handle, so
+ * asking for one sends the caller looking for something that does not exist.
  */
 export function errorResult(err: unknown, extraHint?: string): ToolResult {
   const failure = toFailure(err);
   const code = failure.code;
+  const hasRequestId = typeof failure.requestId === 'string';
   const hint =
     extraHint
     ?? (failure.minted !== undefined ? MINTED_HINTS[failure.minted] : undefined)
     ?? UPSTREAM_HINTS[code]
-    ?? 'Report the requestId with the tool you called; this code is not one this server documents.';
+    ?? (hasRequestId
+      ? 'Report the requestId with the tool you called; this code is not one this server documents.'
+      : 'Report the code and the tool you called; this code is not one this server documents.');
   const message = describeFailure(failure);
   const text = `${message}\nHint: ${hint}`;
   // The same envelope as a success, with ok:false, so a consumer needs one parser
-  // rather than one per outcome.
-  const structured: Record<string, unknown> = { ok: false, message: text, code };
+  // rather than one per outcome. `message` is the refusal without the hint, which
+  // is what makes it different from the content text and worth sending at all.
+  const structured: Record<string, unknown> = { ok: false, message, code };
   if (typeof failure.httpStatus === 'number') structured.httpStatus = failure.httpStatus;
-  if (typeof failure.requestId === 'string') structured.requestId = failure.requestId;
+  if (hasRequestId) structured.requestId = failure.requestId;
   structured.hint = hint;
   return {
     content: [{ type: 'text', text }],

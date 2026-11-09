@@ -68,14 +68,31 @@ try {
   const noAnnotations = listed.filter((t) => t.annotations?.readOnlyHint !== true).map((t) => t.name);
   if (noAnnotations.length > 0) throw new Error(`tools without readOnlyHint: ${noAnnotations.join(', ')}`);
   const callable = listed.filter((t) => (t.inputSchema?.required ?? []).length === 0).map((t) => t.name);
+  let vehicleEnvelope: Record<string, unknown> | undefined;
   for (const name of callable) {
     const r = await client.callTool(name);
     const sc = r.structuredContent;
     if (r.isError) throw new Error(`${name} failed on a no-argument call: ${r.text}`);
-    if (sc?.ok !== true || typeof sc.message !== 'string' || sc.message.length === 0) {
-      throw new Error(`${name} returned no structured ok/message envelope: ${JSON.stringify(r.structuredContent)}`);
+    if (sc?.ok !== true) {
+      throw new Error(`${name} returned no structured ok envelope: ${JSON.stringify(r.structuredContent)}`);
     }
-    if (r.structuredContent?.message !== r.text) throw new Error(`${name}: structuredContent.message diverged from content text`);
+    if (r.structuredContent?.message !== undefined) {
+      throw new Error(`${name}: structuredContent.message repeats the content text`);
+    }
+    if (name === 'list_vehicles') vehicleEnvelope = sc;
+  }
+  // The one tool whose structured payload is load-bearing for a client: the
+  // count and the array have to agree, or a caller pages or loops on a lie.
+  if (vehicleEnvelope === undefined) throw new Error('list_vehicles was not exercised');
+  const vehicleData = vehicleEnvelope.data as { count?: unknown; vehicles?: unknown } | undefined;
+  if (vehicleData === undefined || typeof vehicleData.count !== 'number' || !Array.isArray(vehicleData.vehicles)) {
+    throw new Error(`list_vehicles returned no structured {count, vehicles} data: ${JSON.stringify(vehicleEnvelope)}`);
+  }
+  if (vehicleData.count !== vehicleData.vehicles.length) {
+    throw new Error(`list_vehicles count ${vehicleData.count} does not match ${vehicleData.vehicles.length} vehicles`);
+  }
+  if (!vehicleData.vehicles.every((entry) => typeof (entry as { vin?: unknown }).vin === 'string')) {
+    throw new Error('list_vehicles structured vehicles carry no vin string');
   }
   process.stderr.write(`registry: ${listed.length} tools, ${callable.length} callable with no args\n`);
 
@@ -125,7 +142,9 @@ try {
 
   const badRead = await client.request('resources/read', { uri: 'polestar://vehicle/NOTAVALIDVIN1234567/telemetry/battery' });
   const badText = JSON.stringify(badRead.result ?? badRead.error ?? {});
-  if (!badText.includes('Polestar API error') || !/INVALID_VIN|VIN_NOT_FOUND|DATA_NOT_AVAILABLE|NOT_FOUND/.test(badText)) {
+  // A locally minted refusal renders as "Server refused CODE", an upstream
+  // failure as "Polestar API error CODE". Both share the code vocabulary.
+  if (!/Server refused|Polestar API error/.test(badText) || !/INVALID_VIN|VIN_NOT_FOUND|DATA_NOT_AVAILABLE|NOT_FOUND/.test(badText)) {
     throw new Error(`resources/read error did not render through the shared failure text: ${badText.slice(0, 240)}`);
   }
 

@@ -3,10 +3,13 @@
  * The registry itself is in domains.ts; this module turns it into callable specs.
  */
 import { delegatedAccountArg, errorResult, rawArg, text, vinArg, type ReadArgs, type ToolDeps } from './tool-output.js';
-import { readDomainFormatted } from './vehicle-read.js';
+import { clientFor, readDomainFormatted } from './vehicle-read.js';
 import { maskVin } from './format.js';
 import { DOMAINS, domainPath, toolName } from './domains.js';
 import type { ToolSpec } from './tools.js';
+
+/** list_vehicles reads a credential's vehicles, so it takes the account selector too. */
+type ListVehiclesArgs = { delegated_account_id?: string };
 
 /**
  * list_vehicles, list_domains, and one humanized get_* tool per Domain, all
@@ -19,11 +22,17 @@ export function domainToolSpecs(deps: ToolDeps): ToolSpec[] {
       name: 'list_vehicles',
       title: 'List vehicles',
       description: 'List the VINs this Polestar Data Portal credential is authorized to access.',
+      args: { ...delegatedAccountArg },
       annotations: { readOnlyHint: true, openWorldHint: true },
-      run: async () => {
+      run: async (args: ListVehiclesArgs) => {
         try {
-          const vehicles = await deps.client.vehicles();
-          if (vehicles.length === 0) return text('This credential is not authorized for any vehicle.');
+          // The VIN list is the most identity-sensitive read this server makes, so
+          // a delegated credential must be able to name the account it is listing.
+          const client = clientFor(deps, args?.delegated_account_id);
+          const vehicles = await client.vehicles();
+          if (vehicles.length === 0) {
+            return text('This credential is not authorized for any vehicle.', { data: { count: 0, vehicles: [] } });
+          }
           const entries = vehicles.map((v) => ({
             vin: maskVin(v, deps.redactVin),
             ...(deps.vehicleLabels[v.toUpperCase()] !== undefined ? { label: deps.vehicleLabels[v.toUpperCase()] } : {}),
@@ -62,7 +71,10 @@ export function domainToolSpecs(deps: ToolDeps): ToolSpec[] {
     ...DOMAINS.map((domain): ToolSpec => ({
       name: toolName(domain),
       title: `Get ${domain.name}`,
-      description: `${domain.description} (M2M endpoint: ${domainPath(domain.kind, domain.name)}, scope ${domain.scope}).`,
+      // Endpoint and scope are operator facts: list_domains answers them once,
+      // and repeating them on 15 model-facing descriptions cost about 1.4 KB of
+      // every session's tool list without adding a routing cue.
+      description: domain.description,
       args: { ...vinArg, ...rawArg, ...delegatedAccountArg },
       annotations: { readOnlyHint: true, openWorldHint: true },
       run: (args, ctx) => readDomainFormatted(deps, domain, args as ReadArgs, ctx),

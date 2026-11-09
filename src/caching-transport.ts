@@ -37,10 +37,51 @@ interface CacheEntry {
  */
 const DEFAULT_TTL_MS = 60 * 1000;
 
+/**
+ * An absent Domain is a stable answer, not a transient failure: the reference
+ * car answers 404 DATA_NOT_AVAILABLE for is-at-charge-location whatever we ask.
+ * Keeping it for a minute stops every question about an unreported Domain from
+ * spending live quota, while a car that starts reporting it becomes visible
+ * again shortly. Errors that could be a credential or rate problem (403, 429)
+ * are never stored.
+ */
+const DATA_NOT_AVAILABLE_TTL_MS = 60 * 1000;
+
 function findDomainTtl(ref: { kind: string; name: string }): number {
   const spec = findDomain(ref.kind, ref.name);
   if (spec === undefined) throw new Error(`parseDomainPath returned an unknown Domain ${ref.kind}/${ref.name}`);
   return spec.ttlMs;
+}
+
+/** Header lookup for the identity headers; HTTP header names are case-insensitive. */
+function headerValue(headers: Record<string, string>, name: string): string {
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === wanted) return value;
+  }
+  return '';
+}
+
+/**
+ * Entries are keyed by the URL and the credential that asked, because the
+ * identity travels in headers rather than the URL. A URL-only key served the
+ * owner's cached vehicle list to a delegated partner read, which is a
+ * cross-account disclosure on any process that uses delegation.
+ */
+function cacheKey(url: string, request: TransportRequest): string {
+  const headers = request.headers ?? {};
+  return JSON.stringify([url, headerValue(headers, 'x-client-id'), headerValue(headers, 'x-delegated-account-id')]);
+}
+
+/** True only for the API's "this vehicle does not report that Domain" 404. */
+function isDataNotAvailable(response: TransportResponse): boolean {
+  if (response.status !== 404) return false;
+  try {
+    const parsed = JSON.parse(response.body) as { error?: { code?: unknown } };
+    return parsed?.error?.code === 'DATA_NOT_AVAILABLE';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -55,7 +96,8 @@ function findDomainTtl(ref: { kind: string; name: string }): number {
  * that value can actually change. The car pushes updates to the cloud on state
  * changes, so polling faster than a Domain's lifetime buys nothing.
  *
- * The token POST and error responses pass straight through.
+ * The token POST, other non-GET requests and error responses pass straight
+ * through, except the short-lived negative entry for an unreported Domain.
  */
 export class CachingTransport implements Transport {
   private readonly entries = new Map<string, CacheEntry>();
@@ -80,7 +122,7 @@ export class CachingTransport implements Transport {
       return this.inner.fetch(url, request);
     }
 
-    const key = url;
+    const key = cacheKey(url, request);
     const entry = this.entries.get(key);
     const t = this.now();
 
@@ -95,30 +137,31 @@ export class CachingTransport implements Transport {
       // The refresh runs in the background on purpose: the caller already has an
       // answer. Its failure is reported through onRefreshError, so the rejection
       // is consumed here rather than escaping as an unhandled one.
-      void this.revalidate(key, request).catch(() => undefined);
+      void this.revalidate(key, url, request).catch(() => undefined);
       return entry.response;
     }
 
     this.stats.misses += 1;
-    const response = await this.revalidate(key, request);
+    const response = await this.revalidate(key, url, request);
     return response;
   }
 
-  private revalidate(key: string, request: TransportRequest): Promise<TransportResponse> {
+  private revalidate(key: string, url: string, request: TransportRequest): Promise<TransportResponse> {
     const existing = this.inflight.get(key);
     if (existing) return existing;
 
     const promise = this.inner
-      .fetch(key, request)
+      .fetch(url, request)
       .then((response) => {
-        if (response.status < 400) {
-          this.entries.set(key, { response, fetchedAt: this.now(), ttlMs: this.ttlFor(key) });
+        const ttlMs = this.cacheableTtl(response, url);
+        if (ttlMs !== undefined) {
+          this.entries.set(key, { response, fetchedAt: this.now(), ttlMs });
         }
         this.stats.refreshes += 1;
         return response;
       })
       .catch((err: unknown) => {
-        this.opts.onRefreshError?.({ url: key, message: err instanceof Error ? err.message : String(err) });
+        this.opts.onRefreshError?.({ url, message: err instanceof Error ? err.message : String(err) });
         throw err;
       })
       .finally(() => {
@@ -128,6 +171,12 @@ export class CachingTransport implements Transport {
 
     this.inflight.set(key, promise);
     return promise;
+  }
+
+  /** How long this response stays usable: the Domain's own TTL, or the negative TTL. */
+  private cacheableTtl(response: TransportResponse, url: string): number | undefined {
+    if (response.status < 400) return this.ttlFor(url);
+    return isDataNotAvailable(response) ? DATA_NOT_AVAILABLE_TTL_MS : undefined;
   }
 
   /** The Domain's own freshness rule, or the conservative default. */

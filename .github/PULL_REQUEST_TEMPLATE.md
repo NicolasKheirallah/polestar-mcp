@@ -14,10 +14,11 @@ The reason, not the diff. If it fixes a bug, name the check that failed before a
 ## How it was verified
 
 - [ ] `npm run typecheck` and `npm run build`
-- [ ] `npm test`
-- [ ] `npm run smoke` and `npm run smoke-http`
+- [ ] `npm test` and `npm run coverage` (the thresholded command, not the reporter alone)
+- [ ] `npm run smoke`, `npm run smoke-http` and `npm run smoke-bin`
+- [ ] `npm run demo` and `npm run demo-dump`
 - [ ] `npm run verify-fixtures` and `npm run check-secrets`
-- [ ] `npm run check-tool-refs`
+- [ ] `npm run check-tool-refs`, `npm run check-version` and `npm run check-server-json`
 - [ ] `node docs/check-docs.mjs tools`, `envvars`, `links`, `hygiene`
 - [ ] I added or updated something that can fail on this change, and where a check only
       matters because it can reject something, I ran its positive control

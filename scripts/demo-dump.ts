@@ -1,9 +1,11 @@
 /**
- * Proves the server reproduces real values from the captured endpoint dump
- * (POLESTAR_FIXTURES_DIR pointed at the sibling api_endpoints dump), now
+ * Proves the server reproduces real values from a captured endpoint dump,
  * including the true 404 branch, since the fixture adapter replays captured
- * error statuses. Prints DUMP_OK only after every assertion passes and never
- * prints VINs or values beyond existence checks.
+ * error statuses. Defaults to the shipped synthetic dump under
+ * test/fixtures/dump so the command works on a clean checkout; set
+ * POLESTAR_FIXTURES_DIR to check a real sibling capture instead. Prints DUMP_OK
+ * only after every assertion passes and never prints VINs or values beyond
+ * existence checks.
  */
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +13,10 @@ import path from 'node:path';
 import { StdioMcpClient } from './stdio-client.js';
 
 const PROJECT_ROOT = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
-const DUMP_DIR = path.resolve(PROJECT_ROOT, '..');
+const DEFAULT_DUMP_DIR = path.join(PROJECT_ROOT, 'test', 'fixtures', 'dump');
+const DUMP_DIR = process.env.POLESTAR_FIXTURES_DIR?.trim()
+  ? path.resolve(process.env.POLESTAR_FIXTURES_DIR)
+  : DEFAULT_DUMP_DIR;
 
 if (!existsSync(path.join(DUMP_DIR, 'dataportal', 'vehicles.json'))) {
   console.error(`DUMP_FAILED: expected captured dump at ${DUMP_DIR} (dataportal/vehicles.json not found)`);

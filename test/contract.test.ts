@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DOMAINS, domainPath, parseDomainPath, parseResourceUri, toolName } from '../src/domains.js';
 import { SAMPLED_DOMAINS } from '../src/sampler.js';
-import { activeWarnings, observedAtMs, summarizeDomain } from '../src/format.js';
+import { activeWarnings, observedAtMs, summarizeDomain, valueObservedAtMs } from '../src/format.js';
 
 
 test('every captured domain matches its pinned key set', () => {
@@ -164,4 +164,34 @@ test('the route grammar accepts real paths and refuses invented Domains', () => 
   assert.equal(parseResourceUri('not a uri'), undefined);
   assert.equal(parseDomainPath('/v1/vehicles/YSMTEST22PL000001/telemetry/no-such-domain'), undefined);
   assert.equal(parseDomainPath('/v1/vehicles'), undefined);
+});
+
+test('settings are aged by their own clock, not the cloud receive clock', () => {
+  // The captured settings payloads carry a nested updatedAtTimestamp that is the
+  // value's own time. Reading only the top-level timestamp and metaReceivedAt
+  // presented a setting changed 24 to 88 days earlier as fresh.
+  for (const name of ['amp-limit', 'global-charge-timer', 'parking-climate-timer']) {
+    const file = fileURLToPath(new URL(`./fixtures/dump/dataportal/charging/${name}.json`, import.meta.url));
+    const data = JSON.parse(readFileSync(file, 'utf8')).data as Record<string, unknown>;
+    const observed = valueObservedAtMs(data);
+    const received = Date.parse(String(data.metaReceivedAt));
+    assert.ok(observed !== undefined, `${name}: no value clock found`);
+    assert.ok(Number.isFinite(received), `${name}: no receive clock in the fixture`);
+    assert.ok(
+      received - observed > 5 * 86_400_000,
+      `${name}: observedAtMs still uses the receive clock (${new Date(observed).toISOString()} against ${new Date(received).toISOString()})`,
+    );
+    assert.equal(observedAtMs(data), observed, `${name}: both observation readers must agree`);
+  }
+});
+
+test('the location fixture renders the string-encoded speed and altitude', () => {
+  const file = fileURLToPath(new URL('./fixtures/dump/dataportal/telemetry/location.json', import.meta.url));
+  const data = JSON.parse(readFileSync(file, 'utf8')).data as Record<string, unknown>;
+  const summary = summarizeDomain('location', data, 'km');
+  assert.ok(summary !== null && summary.length > 0);
+  const positionLine = summary[0]!;
+  assert.match(positionLine, /0 km\/h/, `a string speed must render as a number: ${positionLine}`);
+  assert.match(positionLine, /altitude 0 m/, `altitude must render: ${positionLine}`);
+  assert.doesNotMatch(positionLine, /heading\s*°/, 'an absent heading must not print an empty degree sign');
 });

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { isLoopbackHost } from './bind.js';
 
 export const DEFAULT_BASE_URL = 'https://pc-api.polestar.com/eu-north-1/data-portal/m2m';
 
@@ -53,6 +54,12 @@ export interface Config {
   httpHost: string;
   /** Bearer token required in HTTP mode; required before a non-loopback bind. */
   httpToken: string;
+  /**
+   * Cross-origin callers allowed to reach the HTTP listener, as absolute
+   * origins. Empty means the request's own host only, which keeps the default
+   * loopback listener closed to a web page that resolves a hostname to it.
+   */
+  httpAllowedOrigins: string[];
   /** Make an unrecognized POLESTAR_* variable fatal instead of a warning. */
   strictEnv: boolean;
 }
@@ -85,7 +92,7 @@ export const KNOWN_ENV_VARIABLES: readonly string[] = [
   'POLESTAR_BASE_URL', 'POLESTAR_M2M_TOKEN_ENDPOINT', 'POLESTAR_FIXTURES_DIR', 'POLESTAR_ENV_FILE',
   'POLESTAR_TIMEOUT_MS', 'POLESTAR_BUDGET', 'POLESTAR_BUDGET_PER_MINUTE', 'POLESTAR_CACHE', 'POLESTAR_SCOPES', 'POLESTAR_HISTORY_DIR',
   'POLESTAR_HISTORY_SAMPLE_SECONDS', 'POLESTAR_SAMPLE', 'POLESTAR_VEHICLE_LABELS', 'POLESTAR_REDACT_VIN', 'POLESTAR_ALLOW_LOCATION', 'POLESTAR_UNITS',
-  'POLESTAR_LOG', 'POLESTAR_ENABLE_WRITES', 'POLESTAR_HTTP_PORT', 'POLESTAR_HTTP_HOST', 'POLESTAR_HTTP_TOKEN', 'POLESTAR_STRICT_ENV',
+  'POLESTAR_LOG', 'POLESTAR_ENABLE_WRITES', 'POLESTAR_HTTP_PORT', 'POLESTAR_HTTP_HOST', 'POLESTAR_HTTP_TOKEN', 'POLESTAR_HTTP_ALLOWED_ORIGINS', 'POLESTAR_STRICT_ENV',
 ];
 
 /**
@@ -185,17 +192,73 @@ export function normalizeBaseUrl(raw: string, variable = 'POLESTAR_BASE_URL'): s
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     throw new InvalidConfigError(variable, `has scheme ${url.protocol}, expected https://.`, 'Check for a copied quote or a missing scheme.');
   }
+  // A bearer token over plain HTTP is readable by anything on the path. A
+  // loopback host is the one exception: it never leaves the machine, and the
+  // fixture and smoke paths use it.
+  if (url.protocol === 'http:' && !isLoopbackHost(url.hostname)) {
+    throw new InvalidConfigError(
+      variable,
+      `uses http:// for ${url.hostname}, which sends the token in clear text.`,
+      'Use https:// for any non-loopback host; http:// is accepted only for 127.0.0.1 or localhost testing.',
+    );
+  }
   return trimmed;
 }
 
-function numberEnv(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+/**
+ * A numeric setting that is only meaningful above zero. A zero or negative
+ * value used to load and fail later inside a meter with a generic message; here
+ * the variable and the fix are named before startup does anything.
+ */
+function positiveNumberEnv(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  fallback: number,
+  what: 'whole number' | 'number',
+): number {
   const raw = env[name]?.trim();
   if (raw === undefined || raw === '') return fallback;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) {
-    throw new InvalidConfigError(name, `${JSON.stringify(raw)} is not a number.`, `Remove it or set a number (default ${fallback}).`);
+  if (!Number.isFinite(parsed) || parsed <= 0 || (what === 'whole number' && !Number.isInteger(parsed))) {
+    throw new InvalidConfigError(
+      name,
+      `${JSON.stringify(raw)} is not a positive ${what}.`,
+      `Set ${name} to a positive ${what}, for example ${fallback}; remove it to use that default.`,
+    );
   }
   return parsed;
+}
+
+/**
+ * `POLESTAR_HTTP_ALLOWED_ORIGINS`: absolute origins, comma-separated. Parsed here
+ * so a typo is a startup error instead of a guard that admits nothing or a
+ * browser origin silently compared against a string the server never stored.
+ */
+function allowedOriginsOrThrow(raw: string | undefined): string[] {
+  const entries = (raw ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
+  return entries.map((entry) => {
+    let url: URL;
+    try {
+      url = new URL(entry);
+    } catch {
+      throw new InvalidConfigError(
+        'POLESTAR_HTTP_ALLOWED_ORIGINS',
+        `${JSON.stringify(entry)} is not an absolute origin.`,
+        'Use origins such as https://app.example.com, comma-separated; leave it unset to allow the request host only.',
+      );
+    }
+    if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.pathname !== '/' || url.search !== '' || url.hash !== '') {
+      throw new InvalidConfigError(
+        'POLESTAR_HTTP_ALLOWED_ORIGINS',
+        `${JSON.stringify(entry)} is not an origin (scheme and host only).`,
+        'Use origins such as https://app.example.com, comma-separated; leave it unset to allow the request host only.',
+      );
+    }
+    return url.origin.toLowerCase();
+  });
 }
 
 /** Port must be a real TCP port; a typo here otherwise starts a server on a nonsense socket. */
@@ -229,6 +292,13 @@ export function parseVehicleLabels(raw: string | undefined): Record<string, stri
 /** One truthy spelling list, shared by every flag and by the startup checks. */
 export const TRUTHY_ENV = ['1', 'true', 'on'];
 
+/**
+ * The spellings of "off". A privacy switch needs the vocabulary a person
+ * writes, not only the one a programmer writes: `POLESTAR_ALLOW_LOCATION=no`
+ * used to read as "not 0/false/off/disabled" and left location on.
+ */
+export const FALSEY_ENV = ['0', 'false', 'off', 'no', 'never', 'disabled'];
+
 function flagEnv(raw: string | undefined, truthy: string[]): boolean {
   return truthy.includes((raw?.trim().toLowerCase() ?? ''));
 }
@@ -259,7 +329,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   const resolvedAccountId = accountId || clientId || 'fixture-account';
   const unitsRaw = env.POLESTAR_UNITS?.trim().toLowerCase() ?? '';
-  const allowLocation = !flagEnv(env.POLESTAR_ALLOW_LOCATION, ['0', 'false', 'off', 'disabled']);
+  const allowLocation = !flagEnv(env.POLESTAR_ALLOW_LOCATION, FALSEY_ENV);
 
   return {
     clientId,
@@ -269,14 +339,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     tokenUrl: env.POLESTAR_M2M_TOKEN_ENDPOINT?.trim()
       ? normalizeBaseUrl(env.POLESTAR_M2M_TOKEN_ENDPOINT.trim(), 'POLESTAR_M2M_TOKEN_ENDPOINT')
       : `${baseUrl}/token`,
-    timeoutMs: numberEnv(env, 'POLESTAR_TIMEOUT_MS', 15_000),
-    budgetLimit: numberEnv(env, 'POLESTAR_BUDGET', 10_000),
-    budgetPerMinute: numberEnv(env, 'POLESTAR_BUDGET_PER_MINUTE', 100),
-    historySampleSeconds: numberEnv(env, 'POLESTAR_HISTORY_SAMPLE_SECONDS', 600),
+    timeoutMs: positiveNumberEnv(env, 'POLESTAR_TIMEOUT_MS', 15_000, 'whole number'),
+    budgetLimit: positiveNumberEnv(env, 'POLESTAR_BUDGET', 10_000, 'whole number'),
+    budgetPerMinute: positiveNumberEnv(env, 'POLESTAR_BUDGET_PER_MINUTE', 100, 'whole number'),
+    historySampleSeconds: positiveNumberEnv(env, 'POLESTAR_HISTORY_SAMPLE_SECONDS', 600, 'whole number'),
     sample: flagEnv(env.POLESTAR_SAMPLE, TRUTHY_ENV),
     httpPort: httpPortOrThrow(env),
     httpHost: (env.POLESTAR_HTTP_HOST ?? '').trim() || '127.0.0.1',
     httpToken: (env.POLESTAR_HTTP_TOKEN ?? '').trim(),
+    httpAllowedOrigins: allowedOriginsOrThrow(env.POLESTAR_HTTP_ALLOWED_ORIGINS),
     cacheDisabled: flagEnv(env.POLESTAR_CACHE, ['off', 'disabled', '0', 'false']),
     redactVin: flagEnv(env.POLESTAR_REDACT_VIN, ['1', 'true', 'on']),
     vehicleLabels: parseVehicleLabels(env.POLESTAR_VEHICLE_LABELS),

@@ -90,3 +90,38 @@ test('surfaces token-endpoint failures as AuthError with OAuth error, requestId 
     return true;
   });
 });
+
+test('rejects expiresIn that is not a finite positive number of seconds', async () => {
+  // A missing, NaN, zero or negative expiresIn used to be accepted as a number
+  // and put the cached expiry at or before now, so every call re-requested a
+  // token and the server turned one bad response into a token storm.
+  const bodies = [
+    '{"accessToken":"token-1","expiresIn":0}',
+    '{"accessToken":"token-1","expiresIn":-60}',
+    '{"accessToken":"token-1","expiresIn":1e999}', // parses as Infinity
+    '{"accessToken":"token-1","expiresIn":"3600"}',
+    '{"accessToken":"token-1"}',
+  ];
+  for (const body of bodies) {
+    const tp = new TokenProvider(new ScriptedTransport([{ status: 200, body }]), {
+      tokenUrl: 'https://x/token',
+      clientId: 'id',
+      clientSecret: 'secret',
+    });
+    await assert.rejects(tp.token(), (err: unknown) => {
+      assert.ok(err instanceof AuthError, `expected AuthError for ${body}`);
+      assert.match(err.message, /expiresIn/);
+      return true;
+    });
+  }
+});
+
+test('a valid expiresIn still caches the token until expiry minus skew', async () => {
+  const now = 0;
+  const tp = new TokenProvider(
+    new ScriptedTransport([ok({ accessToken: 'token-1', expiresIn: 3_600, tokenType: 'Bearer' })]),
+    { tokenUrl: 'https://x/token', clientId: 'id', clientSecret: 'secret', now: () => now },
+  );
+  assert.equal(await tp.token(), 'token-1');
+  assert.equal(tp.expiresAt(), 3_600_000);
+});

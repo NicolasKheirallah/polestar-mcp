@@ -17,7 +17,10 @@ interface StubResponse {
   body: string;
 }
 
-function makeClient(responses: StubResponse[], opts: { delegatedAccountId?: string; onDomainRead?: (o: DomainObservation) => void } = {}) {
+function makeClient(
+  responses: StubResponse[],
+  opts: { delegatedAccountId?: string; onDomainRead?: (o: DomainObservation) => void; redactVin?: boolean } = {},
+) {
   const transport = new ScriptedTransport(responses);
   const tp = new TokenProvider(transport, {
     tokenUrl: `${BASE}/token`,
@@ -29,6 +32,7 @@ function makeClient(responses: StubResponse[], opts: { delegatedAccountId?: stri
     accountId: 'account-1',
     ...(opts.delegatedAccountId ? { delegatedAccountId: opts.delegatedAccountId } : {}),
     ...(opts.onDomainRead ? { onDomainRead: opts.onDomainRead } : {}),
+    ...(opts.redactVin ? { redactVin: true } : {}),
   });
   return { client, transport };
 }
@@ -416,4 +420,92 @@ test('switching to a delegated account costs no extra request', async () => {
   const reads = transport.calls.filter((c) => !c.url.endsWith('/token'));
   assert.equal(reads.length, 1, 'the header and the read are one request');
   assert.equal(reads[0]!.request.headers?.['x-delegated-account-id'], 'partner-a', 'the header travels with the read, not before it');
+});
+
+/**
+ * POLESTAR_REDACT_VIN reaches the client's own failures.
+ *
+ * A mismatch is exactly the event a privacy-minded operator is watching, and it
+ * is the error that used to print both the requested and the actual identifier.
+ * The raw payload stays untouched: `raw: true` is the documented exception.
+ */
+test('redactVin masks the VINs inside VIN_MISMATCH and AMBIGUOUS_VIN messages', async () => {
+  const other = 'YSMTEST22PL000099';
+
+  const mismatch = makeClient(
+    [
+      tokenBody('t'),
+      { status: 200, body: JSON.stringify({ data: { vin: VIN }, meta: { domain: 'battery', vin: other } }) },
+    ],
+    { redactVin: true },
+  );
+  await assert.rejects(
+    () => mismatch.client.domain(VIN, 'telemetry', 'battery'),
+    (err: PolestarApiError) => {
+      assert.equal(err.code, 'VIN_MISMATCH');
+      assert.equal(err.message.includes(VIN), false, 'the requested VIN is masked');
+      assert.equal(err.message.includes(other), false, 'the actual VIN is masked');
+      assert.match(err.message, /YSM…001/);
+      assert.match(err.message, /YSM…099/);
+      return true;
+    },
+  );
+
+  const payloadMismatch = makeClient(
+    [
+      tokenBody('t'),
+      { status: 200, body: JSON.stringify({ data: { vin: other }, meta: { domain: 'battery' } }) },
+    ],
+    { redactVin: true },
+  );
+  await assert.rejects(
+    () => payloadMismatch.client.domain(VIN, 'telemetry', 'battery'),
+    (err: PolestarApiError) => err.code === 'VIN_MISMATCH' && !err.message.includes(other) && /YSM…099/.test(err.message),
+  );
+
+  const ambiguous = makeClient(
+    [tokenBody('t'), { status: 200, body: JSON.stringify({ data: [VIN, other] }) }],
+    { redactVin: true },
+  );
+  await assert.rejects(
+    () => ambiguous.client.resolveVin(undefined),
+    (err: PolestarApiError) => {
+      assert.equal(err.code, 'AMBIGUOUS_VIN');
+      assert.equal(err.message.includes(VIN), false);
+      assert.equal(err.message.includes(other), false);
+      assert.match(err.message, /YSM…001, YSM…099/);
+      return true;
+    },
+  );
+
+  // Control: without the flag the identifier is the answer, not a leak.
+  const plain = makeClient([tokenBody('t'), { status: 200, body: JSON.stringify({ data: [VIN, other] }) }]);
+  await assert.rejects(() => plain.client.resolveVin(undefined), (err: PolestarApiError) => err.message.includes(VIN) && err.message.includes(other));
+});
+
+test('redactVin does not touch raw payloads, and documents the resource URI exception', async () => {
+  const { client } = makeClient(
+    [
+      tokenBody('t'),
+      { status: 200, body: JSON.stringify({ data: { vin: VIN, batteryChargeLevelPercentage: 52 }, meta: { domain: 'battery', vin: VIN } }) },
+    ],
+    { redactVin: true },
+  );
+  const data = await client.domain(VIN, 'telemetry', 'battery');
+  assert.equal(data?.vin, VIN, 'the raw payload is handed back exactly as the API sent it');
+
+  // A masked VIN copied out of a resource name is refused, and the message says
+  // where the readable identifier still is.
+  const invalid = makeClient([], { redactVin: true });
+  await assert.rejects(invalid.client.resolveVin('YSM…001'), (err: PolestarApiError) => {
+    assert.equal(err.code, 'INVALID_VIN');
+    assert.match(err.message, /resource URI/);
+    return true;
+  });
+  const plain = makeClient([]);
+  await assert.rejects(plain.client.resolveVin('YSM…001'), (err: PolestarApiError) => {
+    assert.equal(err.code, 'INVALID_VIN');
+    assert.doesNotMatch(err.message, /resource URI/);
+    return true;
+  });
 });

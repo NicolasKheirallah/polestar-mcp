@@ -1,5 +1,6 @@
 import type { CacheStats } from './caching-transport.js';
 import type { BudgetMeter, MinuteWindowMeter } from './budget.js';
+import { EXPIRY_SKEW_MS } from './auth.js';
 import { text, type ToolDeps } from './tool-output.js';
 import type { ToolSpec } from './tools.js';
 
@@ -51,15 +52,18 @@ export function systemToolSpecs(deps: SystemDeps): ToolSpec[] {
             `Cache: ${cache.hits} hits + ${cache.staleServed} stale-served of ${totalReads} reads (${hitRate}%), ${cache.misses} live misses, ${cache.refreshes} refreshes, ${cache.entries} entries`,
           );
         } else {
-          lines.push('Cache: off (POLESTAR_CACHE_DISABLED, or fixture mode without a history store)');
+          lines.push('Cache: off (POLESTAR_CACHE=off, or fixture mode without a history store)');
         }
         const expiresAt = deps.tokenExpiresAt();
         // The clock is injected like every other one this server reads, so the
         // reported expiry can be asserted instead of drifting with the wall.
         const nowMs = deps.nowMs?.() ?? Date.now();
+        // The provider refetches before the advertised expiry, so report the life
+        // it will actually use; the advertised number overstates it by the skew.
+        const trustedUntil = expiresAt !== undefined ? expiresAt - EXPIRY_SKEW_MS : undefined;
         lines.push(
-          expiresAt !== undefined
-            ? `Token: trusted ~${Math.max(0, Math.round((expiresAt - nowMs) / 60_000))} more min`
+          trustedUntil !== undefined
+            ? `Token: trusted ~${Math.max(0, Math.round((trustedUntil - nowMs) / 60_000))} more min`
             : 'Token: not yet issued',
         );
         return text(lines.join('\n'));

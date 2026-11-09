@@ -2,9 +2,15 @@ name: ci
 on:
   push:
   pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -18,13 +24,21 @@ jobs:
       - run: npm run build
       - run: npm run verify-fixtures
       - run: npm test
+      # The coverage thresholds live in package.json and are part of the command,
+      # so this step can fail instead of only printing a report.
       - run: npm run coverage
       - run: npm run smoke
       # The published launch path: a global install runs the bin symlink, not the file.
       - run: npm run smoke-bin
       - run: npm run smoke-http
+      # The offline demo, against the shipped synthetic dump. It is also what the
+      # packed tarball is checked with below.
+      - run: npm run demo
+      - run: npm run demo-dump
       - run: npm run check-secrets
       - run: npm run check-tool-refs
+      - run: npm run check-version
+      - run: npm run check-server-json
       - run: node docs/check-docs.mjs tools
       - run: node docs/check-docs.mjs envvars
       - run: node docs/check-docs.mjs links
@@ -35,4 +49,73 @@ jobs:
       # the scope quietly narrowed. It scans untracked source too, so a new file is
       # covered before it is ever committed.
       - run: node docs/check-docs.mjs hygiene
-      # demo-dump needs the sibling captured dump, which never leaves the machine.
+
+  # The floor in package.json engines is a support claim, so it gets its own run.
+  node-floor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20.11, 22, 24]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run verify-fixtures
+      - run: npm test
+      - run: npm run smoke
+      - run: npm run smoke-bin
+      - run: npm run check-version
+      - run: npm run check-server-json
+      - run: node docs/check-docs.mjs tools
+      - run: node docs/check-docs.mjs envvars
+      - run: node docs/check-docs.mjs links
+
+  # Prove the artifact, not the checkout: pack, install the tarball into a temp
+  # directory and run the commands the packaged README tells a user to run.
+  pack-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Pack and install the tarball
+        run: |
+          set -euo pipefail
+          TARBALL=$(npm pack --silent)
+          echo "packed $TARBALL"
+          mkdir -p /tmp/polestar-install
+          cd /tmp/polestar-install
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "$GITHUB_WORKSPACE/$TARBALL"
+          cd node_modules/polestar-mcp
+          test -f scripts/demo.mjs
+          test -f test/fixtures/dump/dataportal/vehicles.json
+          npm run demo
+          ../.bin/polestar-mcp --version
+          ../.bin/polestar-mcp --help >/dev/null
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build image
+        run: docker build -t polestar-mcp:ci .
+      - name: Run as non-root and answer the healthcommand
+        run: |
+          set -euo pipefail
+          docker run --rm polestar-mcp:ci --version
+          docker run --rm --entrypoint node polestar-mcp:ci -e "process.exit(process.getuid() === 0 ? 1 : 0)"
+          docker inspect --format '{{json .Config.Healthcheck}}' polestar-mcp:ci | grep -q '"Test"'

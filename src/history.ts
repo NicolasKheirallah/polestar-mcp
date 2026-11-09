@@ -1,8 +1,18 @@
-import { mkdirSync, appendFileSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { mkdirSync, appendFileSync, readFileSync, existsSync, statSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { batteryView, isChargingStatus } from './domain-data.js';
 
-const MAX_HISTORY_FILE_BYTES = 64 * 1024 * 1024;
+/** The read guard: a file larger than this is refused instead of loaded whole. */
+export const MAX_HISTORY_FILE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * The default append bound. When a file would grow past it, the oldest half of
+ * its lines is dropped before the new record is written, so the newest records
+ * always survive and the read guard above is never the first thing a long-lived
+ * install meets. A store built without this argument keeps the old behaviour of
+ * an unbounded append.
+ */
+export const DEFAULT_MAX_HISTORY_FILE_BYTES = MAX_HISTORY_FILE_BYTES;
 
 const statSyncSize = (file: string): number | undefined => {
   try {
@@ -13,14 +23,30 @@ const statSyncSize = (file: string): number | undefined => {
 };
 
 export interface HistoryRecord {
-  /** Epoch ms when the server observed the value. */
+  /**
+   * Epoch ms when the server read the value, the read clock. It is what the
+   * store sorts and filters on, and for records written before the value clock
+   * existed it is also the only timestamp available.
+   */
   observedAt: number;
+  /**
+   * Epoch ms of the value's own clock: the payload `timestamp.seconds`, or
+   * `metaReceivedAt` when the payload carries no sensor timestamp. Optional so
+   * every file written before this field existed stays readable; when absent the
+   * read clock above is rendered instead and the answer says so.
+   */
+  valueObservedAt?: number | undefined;
   /** Cloud-assigned change ID. Consecutive repeats of the last stored ID for a file are
    * dropped from an in-memory map, so the guard holds within a process run, not across
    * restarts and not for an ID that reappears after a different one. */
   metaEventId?: string | undefined;
   /** The unwrapped domain payload as the car reported it. */
   data: unknown;
+}
+
+/** When the sample itself happened: the value clock when recorded, else the read clock. */
+export function recordTimeMs(record: HistoryRecord): number {
+  return record.valueObservedAt ?? record.observedAt;
 }
 
 export interface HistoryQuery {
@@ -40,17 +66,53 @@ export interface HistoryQuery {
  * depends on a local store like this one. Deduplication is by metaEventId:
  * the cloud re-serves the same ID until the car reports something new, so
  * unchanged snapshots cost a single line each and query files stay small.
+ *
+ * The append bound is a retention rule, not a hard cap: a file that would grow
+ * past `maxFileBytes` is rewritten with its newest half before the new record
+ * is added, so the store stays readable without an operator pruning by hand.
+ * The constant read guard above still refuses a file that grew some other way.
  */
 export class HistoryStore {
-  constructor(readonly rootDir: string) {}
+  /** The append bound in bytes, clamped to the read guard so a hand-set value cannot make reads impossible. */
+  readonly maxFileBytes: number;
+
+  constructor(readonly rootDir: string, maxFileBytes: number = DEFAULT_MAX_HISTORY_FILE_BYTES) {
+    this.maxFileBytes = Math.min(Math.max(Math.trunc(maxFileBytes), 64), MAX_HISTORY_FILE_BYTES);
+  }
 
   append(vin: string, kind: string, name: string, record: HistoryRecord): void {
     const file = this.fileFor(vin, kind, name);
     mkdirSync(path.dirname(file), { recursive: true });
     const lastId = this.lastEventId.get(file) ?? this.tailEventId(file);
     if (record.metaEventId !== undefined && record.metaEventId === lastId) return;
+    const line = JSON.stringify(record) + '\n';
+    this.pruneIfNeeded(file, Buffer.byteLength(line));
     if (record.metaEventId !== undefined) this.lastEventId.set(file, record.metaEventId);
-    appendFileSync(file, JSON.stringify(record) + '\n');
+    appendFileSync(file, line);
+  }
+
+  /**
+   * Keep the newest half of a file that would exceed the append bound. The
+   * rewrite goes through a sibling temporary file and a rename, so a crash
+   * cannot leave a half-written history in place of the original. A single
+   * record larger than the whole bound is still kept: losing the newest sample
+   * is worse than exceeding the retention target once.
+   */
+  private pruneIfNeeded(file: string, incomingBytes: number): void {
+    const size = statSyncSize(file);
+    if (size === undefined || size + incomingBytes <= this.maxFileBytes) return;
+    let lines: string[];
+    try {
+      lines = readFileSync(file, 'utf8').split('\n').filter((line) => line.trim().length > 0);
+    } catch {
+      return;
+    }
+    if (lines.length === 0) return;
+    const keep = Math.max(1, Math.ceil(lines.length / 2));
+    const kept = lines.slice(lines.length - keep);
+    const tmp = `${file}.tmp`;
+    writeFileSync(tmp, kept.join('\n') + '\n');
+    renameSync(tmp, file);
   }
 
   query(vin: string, kind: string, name: string, q: HistoryQuery = {}): HistoryRecord[] {
@@ -120,7 +182,9 @@ export interface ChargingSession {
   /** Seconds between the first and last charging sample. Gaps are included, so this is
    * the span a session covers, not the time the charger was actually delivering power. */
   activeSeconds: number;
-  peakPowerWatts: number;
+  /** Highest reported charging power. Absent when no sample in the session reported
+   * power at all: an unreported value is not a measured zero. */
+  peakPowerWatts?: number | undefined;
   maxChargeLevelPct?: number | undefined;
   sampleCount: number;
 }
@@ -143,7 +207,8 @@ export interface DegradationPoint {
 export function extractChargingSessions(samples: HistoryRecord[], gapMs = 30 * 60 * 1000): ChargingSession[] {
   interface Sample {
     at: number;
-    power: number;
+    /** Undefined when the car reported no charging power, not zero. */
+    power: number | undefined;
     charging: boolean;
     level: number | undefined;
   }
@@ -152,12 +217,12 @@ export function extractChargingSessions(samples: HistoryRecord[], gapMs = 30 * 6
     const stored = record.data;
     if (stored === null || typeof stored !== 'object') continue;
     const view = batteryView(stored as Record<string, unknown>);
-    const power = view.powerWatts ?? 0;
+    const power = view.powerWatts;
     // The enum rule belongs to the payload reader, not to this loop: endsWith,
     // not includes, because 'CHARGING_STATUS_V2_IDLE' contains "CHARGING" as a
     // substring of the enum namespace.
-    const charging = power > 0 || isChargingStatus(view.status);
-    parsed.push({ at: record.observedAt, power, charging, level: view.chargeLevelPct });
+    const charging = (power !== undefined && power > 0) || isChargingStatus(view.status);
+    parsed.push({ at: recordTimeMs(record), power, charging, level: view.chargeLevelPct });
   }
   parsed.sort((a, b) => a.at - b.at);
 
@@ -183,12 +248,13 @@ export function extractChargingSessions(samples: HistoryRecord[], gapMs = 30 * 6
     }
     const s = current.samples;
     const levels = s.map((x) => x.level).filter((l): l is number => l !== undefined);
+    const powers = s.map((x) => x.power).filter((p): p is number => p !== undefined);
     sessions.push({
       startedAt: s[0]!.at,
       lastSeenAt: s[s.length - 1]!.at,
       activeSeconds: Math.round((s[s.length - 1]!.at - s[0]!.at) / 1000),
-      peakPowerWatts: Math.max(...s.map((x) => x.power)),
-      ...(levels.length > 0 ? { maxChargeLevelPct: Math.max(...levels) } : {}),
+      ...(powers.length > 0 ? { peakPowerWatts: powers.reduce((max, p) => Math.max(max, p), 0) } : {}),
+      ...(levels.length > 0 ? { maxChargeLevelPct: levels.reduce((max, l) => Math.max(max, l), 0) } : {}),
       sampleCount: s.length,
     });
     current = undefined;
@@ -200,6 +266,10 @@ export function extractChargingSessions(samples: HistoryRecord[], gapMs = 30 * 6
  * range/SoC, and pack capacity implied by dischargeInfo.energyAvailable when
  * the car reports it. Both are estimates, range is conditions-dependent 
  * so the report presents the series, not a single verdict.
+ *
+ * A record that reports neither a range nor usable energy contributes no
+ * signal, so it is dropped here rather than counted as a sample the report
+ * could use. Its time is the value clock when the recorder stored one.
  */
 export function degradationSeries(samples: HistoryRecord[]): DegradationPoint[] {
   const points: DegradationPoint[] = [];
@@ -211,16 +281,19 @@ export function degradationSeries(samples: HistoryRecord[]): DegradationPoint[] 
     if (soc === undefined || soc <= 5) continue; // low-SoC range estimates are noisy
     const range = view.distanceToEmptyKm;
     const energyAvailable = view.energyAvailableKwh;
+    const hasRange = range !== undefined;
+    const hasCapacity = energyAvailable !== undefined && energyAvailable > 0;
+    if (!hasRange && !hasCapacity) continue;
     points.push({
-      observedAt: record.observedAt,
+      observedAt: recordTimeMs(record),
       socPct: soc,
-      ...(range !== undefined
+      ...(hasRange
         ? {
             estimatedRangeKm: range,
             impliedFullRangeKm: Math.round((range / soc) * 100),
           }
         : {}),
-      ...(energyAvailable !== undefined && energyAvailable > 0
+      ...(hasCapacity
         ? { impliedCapacityKwh: Math.round((energyAvailable / soc) * 100 * 10) / 10 }
         : {}),
     });

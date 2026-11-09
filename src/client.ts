@@ -6,6 +6,11 @@ export type DomainKind = 'telemetry' | 'charging';
 
 const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/; // standard VIN alphabet: no I, O, Q
 
+/** `YSM…001`, the same mask the tool text uses. Kept local so this layer owns no display module. */
+function maskVin(vin: string, redact: boolean): string {
+  return redact ? `${vin.slice(0, 3)}…${vin.slice(-3)}` : vin;
+}
+
 export class PolestarApiError extends Error {
   constructor(
     readonly code: string,
@@ -27,6 +32,13 @@ export interface PolestarClientOptions {
   delegatedAccountId?: string;
   /** False blocks the position domain at the request layer, not just its display. */
   allowLocation?: boolean;
+  /**
+   * Mask VINs in the error text this client raises: a mismatch is exactly the
+   * event a privacy-minded operator is watching, and it used to print both the
+   * requested and the actual identifier. Raw payloads and the resource URI stay
+   * unmasked; those are the documented exceptions.
+   */
+  redactVin?: boolean;
   /**
    * Called with the unwrapped payload after every successful domain GET.
    *
@@ -107,9 +119,16 @@ export class PolestarClient {
     const normalized = vin?.trim().toUpperCase();
     if (normalized !== undefined && normalized !== '') {
       if (!VIN_RE.test(normalized)) {
+        // With redaction on, the URI is the one place a full VIN still appears,
+        // so a masked value copied out of a resource name lands here. Say where
+        // the readable identifier is instead of leaving the caller to guess.
+        const uriException =
+          this.opts.redactVin === true
+            ? ' POLESTAR_REDACT_VIN hides VINs in tool and resource text; the resource URI is the documented exception, so copy the VIN from a resource URI when subscribing.'
+            : '';
         throw new PolestarApiError(
           'INVALID_VIN',
-          `"${vin}" is not a plausible VIN (17 characters, no I/O/Q). Call list_vehicles for valid VINs.`,
+          `"${vin}" is not a plausible VIN (17 characters, no I/O/Q). Call list_vehicles for valid VINs.${uriException}`,
           400,
         );
       }
@@ -120,9 +139,10 @@ export class PolestarClient {
     if (vins.length === 0) {
       throw new PolestarApiError('NO_VEHICLES', 'This credential is not authorized for any vehicle.', 404);
     }
+    const redact = this.opts.redactVin === true;
     throw new PolestarApiError(
       'AMBIGUOUS_VIN',
-      `This credential has ${vins.length} vehicles; pass an explicit vin. Known VINs: ${vins.join(', ')}`,
+      `This credential has ${vins.length} vehicles; pass an explicit vin. Known VINs: ${vins.map((v) => maskVin(v, redact)).join(', ')}`,
       400,
     );
   }
@@ -163,7 +183,7 @@ export class PolestarClient {
     if (data !== undefined && data !== null && !(typeof data === 'object' && !Array.isArray(data))) {
       throw new PolestarApiError('BAD_RESPONSE', `Domain ${kind}/${name} returned a non-object data payload.`, res.status);
     }
-    assertIdentity(envelope, data, vin, kind, name);
+    assertIdentity(envelope, data, vin, kind, name, this.opts.redactVin === true);
     if (data !== null && data !== undefined && typeof data === 'object' && !Array.isArray(data)) {
       const payload = data as Record<string, unknown>;
       const metaEventId = payload.metaEventId;
@@ -218,14 +238,17 @@ function assertIdentity(
   vin: string,
   kind: DomainKind,
   name: string,
+  redactVin: boolean,
 ): void {
   const meta = (envelope as { meta?: { vin?: unknown; domain?: unknown } }).meta;
   const wanted = vin.toUpperCase();
   const actual = typeof meta?.vin === 'string' ? meta.vin.toUpperCase() : undefined;
   if (actual !== undefined && actual !== wanted) {
+    // The failure itself must obey the flag: a transcript reader learning the
+    // VIN from the mismatch error defeats the point of setting it.
     throw new PolestarApiError(
       'VIN_MISMATCH',
-      `Requested ${wanted} but the ${kind}/${name} response is labelled ${actual}.`,
+      `Requested ${maskVin(wanted, redactVin)} but the ${kind}/${name} response is labelled ${maskVin(actual, redactVin)}.`,
       200,
     );
   }
@@ -243,7 +266,11 @@ function assertIdentity(
       ? ((data as { vin: string }).vin as string).toUpperCase()
       : undefined;
   if (dataVin !== undefined && dataVin !== wanted) {
-    throw new PolestarApiError('VIN_MISMATCH', `Response data is for ${dataVin}, not the requested ${wanted}.`, 200);
+    throw new PolestarApiError(
+      'VIN_MISMATCH',
+      `Response data is for ${maskVin(dataVin, redactVin)}, not the requested ${maskVin(wanted, redactVin)}.`,
+      200,
+    );
   }
 }
 function parseJson(body: string): unknown {
