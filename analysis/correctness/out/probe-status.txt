@@ -1,0 +1,19 @@
+{
+  "A_token_clock": {
+    "statusLine": "Token: trusted ~3 more min",
+    "tokenRequestsBefore": 1,
+    "tokenRequestsAfterCallingToken": 2,
+    "note": "status said \"trusted\", the provider refetched because the 300s skew had started"
+  },
+  "B_cache_off_line": "Cache: off (POLESTAR_CACHE_DISABLED, or fixture mode without a history store)",
+  "B_named_variable_is_recognized": false,
+  "B_named_variable_unknown_report": [
+    {
+      "name": "POLESTAR_CACHE_DISABLED",
+      "suggests": "POLESTAR_CACHE"
+    }
+  ],
+  "B_real_switch": {
+    "POLESTAR_CACHE_off_disables_cache": true
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "result": {
+    "resourceTemplates": [
+      {
+        "name": "Vehicle telemetry domains",
+        "uriTemplate": "polestar://vehicle/{vin}/telemetry/{domain}",
+        "description": "Live telemetry for one vehicle and domain, humanized.",
+        "mimeType": "text/plain"
+      },
+      {
+        "name": "Vehicle charging domains",
+        "uriTemplate": "polestar://vehicle/{vin}/charging/{domain}",
+        "description": "Live charging for one vehicle and domain, humanized.",
+        "mimeType": "text/plain"
+      }
+    ]
+  },
+  "jsonrpc": "2.0",
+  "id": 15
+}

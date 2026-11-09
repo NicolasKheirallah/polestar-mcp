@@ -1,0 +1,18 @@
+{
+  "boundary": {
+    "at_23_59_59": {
+      "used": 2,
+      "resetsAtUtc": "2026-01-02T00:00:00.000Z"
+    },
+    "at_00_00_00": {
+      "used": 0,
+      "resetsAtUtc": "2026-01-03T00:00:00.000Z"
+    },
+    "note": "the whole budget resets at the UTC midnight instant; a rolling 24h window would not"
+  },
+  "backward_clock": {
+    "used_after_roll": 0,
+    "used_after_backward_step": 1,
+    "note": "dayStart < windowStart so no re-roll: the post-midnight call is metered against the previous day window"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "requests": 3,
+  "allFailedWith401": true,
+  "tokenPosts": 4,
+  "getAttempts": 6,
+  "authorizationUsed": [
+    "Bearer tok-1",
+    "Bearer tok-1",
+    "Bearer tok-1",
+    "Bearer tok-2",
+    "Bearer tok-3",
+    "Bearer tok-4"
+  ],
+  "note": "each 401 wipes the token that the previous retry had just minted, so 3 requests spent 4 token POSTs instead of 2"
+}

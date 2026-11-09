@@ -1,0 +1,18 @@
+{
+  "off": {
+    "label": "POLESTAR_CACHE=off",
+    "cacheEnabled": false,
+    "budgetUsed": 0,
+    "minuteUsed": 0,
+    "httpRequests": 2,
+    "vehiclesOutcome": "PolestarApiError: Request failed (HTTP 429)."
+  },
+  "on": {
+    "label": "cache default (on)",
+    "cacheEnabled": true,
+    "budgetUsed": 4,
+    "minuteUsed": 4,
+    "httpRequests": 4,
+    "vehiclesOutcome": "[\"YSMTEST22PL000001\"]"
+  }
+}

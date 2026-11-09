@@ -1,0 +1,63 @@
+{
+  "absenceAggregates": {
+    "label": "health+exterior DATA_NOT_AVAILABLE",
+    "calls": [
+      {
+        "name": "get_car_status",
+        "args": {},
+        "isError": false,
+        "text": "Car status, YSMTEST22PL000001\n\u2022 Battery: 52% \u00b7 170 km range \u00b7 Idle \u00b7 Unplugged\n\u2022 Car is available (Asleep / not in use)\n\u2022 Odometer: 122,953 km\nData as of 48 d ago (newest domain).",
+        "textBytes": 188,
+        "structKeys": [
+          "ok",
+          "message"
+        ],
+        "structBytes": 216
+      },
+      {
+        "name": "is_car_secure",
+        "args": {},
+        "isError": false,
+        "text": "No exterior data is available for vehicle YSMTEST22PL000001 (the API returned DATA_NOT_AVAILABLE, this vehicle does not report this domain).",
+        "textBytes": 140,
+        "structKeys": [
+          "ok",
+          "message"
+        ],
+        "structBytes": 164
+      },
+      {
+        "name": "get_needs_attention",
+        "args": {},
+        "isError": false,
+        "text": "No health data is available for vehicle YSMTEST22PL000001 (the API returned DATA_NOT_AVAILABLE, this vehicle does not report this domain).",
+        "textBytes": 138,
+        "structKeys": [
+          "ok",
+          "message"
+        ],
+        "structBytes": 162
+      },
+      {
+        "name": "get_charging_estimate",
+        "args": {},
+        "isError": false,
+        "text": "Usable-energy data not reported; showing the car's own estimate instead.\nAssumptions: power estimated from 20 A \u00d7 230 V assumed \u00d7 3 phase(s); the car reports no charging voltage.",
+        "textBytes": 180,
+        "structKeys": [
+          "ok",
+          "message"
+        ],
+        "structBytes": 205
+      }
+    ]
+  },
+  "fleetResources": {
+    "vehicleCountInFixture": 12,
+    "resourcesListBytes": 27865,
+    "resourcesListCount": 150,
+    "hasNextCursor": false,
+    "distinctVinsListed": 10,
+    "listVehiclesText": "Authorized vehicles (12):\n  - YSMTEST22PL000000\n  - YSMTEST22PL000001\n  - YSMTEST22PL000002\n  - YSMTEST22PL000003\n  - YSMTEST22PL000004\n  - YSMTEST22PL000005\n  - YSMTEST22PL000006\n  - YSMTEST22PL000007\n  - YSMTEST22PL000008\n  - YSMTEST22PL000009\n  - YSMTEST22PL000010\n  - YSMTEST22PL000011"
+  }
+}

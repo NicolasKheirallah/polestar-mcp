@@ -1,0 +1,17 @@
+{
+  "results": [
+    null,
+    null,
+    null
+  ],
+  "cacheStats": {
+    "enabled": true,
+    "hits": 0,
+    "misses": 3,
+    "staleServed": 0,
+    "refreshes": 3,
+    "entries": 0
+  },
+  "domainCalls": 3,
+  "note": "three reads of an absent domain -> three live calls; a 200 response would be served from cache after one"
+}

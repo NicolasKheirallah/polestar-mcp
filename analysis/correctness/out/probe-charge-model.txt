@@ -1,0 +1,11 @@
+{
+  "model": {
+    "assumed_230V_x_3phases_kW": 11.04,
+    "reported_400V_x_3phases_kW": 19.2,
+    "physical_3x16A_at_400V_line_to_line_kW": 11.085,
+    "physical_3x16A_at_230V_per_phase_kW": 11.04,
+    "assumedLineVolts": 230,
+    "ratio_400V_path_vs_physical": 1.73
+  },
+  "get_charging_estimate_text": "Energy to 80%: 31.2 kWh (now 40%).\nTime at 19.2 kW: ~1h 38m.\nAssumptions: power estimated from 16 A × 400 V (reported) × 3 phase(s); capacity 78.0 kWh derived from dischargeInfo.energyAvailable at 40%."
+}

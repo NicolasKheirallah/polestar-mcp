@@ -1,0 +1,710 @@
+{
+  "initialize": {
+    "resultBytes": 1144,
+    "instructionsBytes": 882,
+    "capabilities": {
+      "resources": {
+        "subscribe": true,
+        "listChanged": true
+      },
+      "logging": {},
+      "tools": {
+        "listChanged": true
+      },
+      "completions": {},
+      "prompts": {
+        "listChanged": true
+      }
+    },
+    "serverInfo": {
+      "name": "polestar-mcp",
+      "version": "0.3.0"
+    },
+    "protocolVersion": "2025-06-18"
+  },
+  "toolsList": {
+    "toolCount": 26,
+    "fullResultBytes": 50718,
+    "fullResultTokensEst": 12680,
+    "totalDescriptionBytes": 5692,
+    "totalOutputSchemaBytes": 26234,
+    "totalInputSchemaBytes": 14599,
+    "perTool": [
+      {
+        "name": "get_battery",
+        "title": "Get battery",
+        "descriptionLength": 615,
+        "descriptionBytes": 615,
+        "toolBytes": 2420,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "plan_cheapest_charge",
+        "title": "Plan the cheapest charge",
+        "descriptionLength": 179,
+        "descriptionBytes": 179,
+        "toolBytes": 2400,
+        "inputSchemaBytes": 1041,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": [
+          "prices"
+        ]
+      },
+      {
+        "name": "get_global_charge_timer",
+        "title": "Get global-charge-timer",
+        "descriptionLength": 316,
+        "descriptionBytes": 316,
+        "toolBytes": 2145,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_charge_locations",
+        "title": "Get charge-locations",
+        "descriptionLength": 294,
+        "descriptionBytes": 298,
+        "toolBytes": 2121,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_history",
+        "title": "Query recorded history",
+        "descriptionLength": 155,
+        "descriptionBytes": 155,
+        "toolBytes": 2094,
+        "inputSchemaBytes": 791,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true
+        },
+        "required": [
+          "domain"
+        ]
+      },
+      {
+        "name": "get_parking_climatization",
+        "title": "Get parking-climatization",
+        "descriptionLength": 243,
+        "descriptionBytes": 243,
+        "toolBytes": 2076,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_amp_limit",
+        "title": "Get amp-limit",
+        "descriptionLength": 258,
+        "descriptionBytes": 258,
+        "toolBytes": 2067,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_is_at_charge_location",
+        "title": "Get is-at-charge-location",
+        "descriptionLength": 227,
+        "descriptionBytes": 227,
+        "toolBytes": 2060,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_health",
+        "title": "Get health",
+        "descriptionLength": 253,
+        "descriptionBytes": 253,
+        "toolBytes": 2056,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_charge_now",
+        "title": "Get charge-now",
+        "descriptionLength": 230,
+        "descriptionBytes": 230,
+        "toolBytes": 2041,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_pre_cleaning",
+        "title": "Get pre-cleaning",
+        "descriptionLength": 208,
+        "descriptionBytes": 208,
+        "toolBytes": 2023,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_parking_climate_timer",
+        "title": "Get parking-climate-timer",
+        "descriptionLength": 190,
+        "descriptionBytes": 190,
+        "toolBytes": 2023,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_availability",
+        "title": "Get availability",
+        "descriptionLength": 195,
+        "descriptionBytes": 195,
+        "toolBytes": 2010,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_exterior",
+        "title": "Get exterior",
+        "descriptionLength": 192,
+        "descriptionBytes": 192,
+        "toolBytes": 1999,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_charging_estimate",
+        "title": "Charging time and energy estimate",
+        "descriptionLength": 254,
+        "descriptionBytes": 254,
+        "toolBytes": 1996,
+        "inputSchemaBytes": 552,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_location",
+        "title": "Get location",
+        "descriptionLength": 168,
+        "descriptionBytes": 168,
+        "toolBytes": 1975,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_target_soc",
+        "title": "Get target-soc",
+        "descriptionLength": 164,
+        "descriptionBytes": 164,
+        "toolBytes": 1975,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_odometer",
+        "title": "Get odometer",
+        "descriptionLength": 164,
+        "descriptionBytes": 164,
+        "toolBytes": 1971,
+        "inputSchemaBytes": 647,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_degradation_report",
+        "title": "Battery degradation estimate",
+        "descriptionLength": 219,
+        "descriptionBytes": 219,
+        "toolBytes": 1922,
+        "inputSchemaBytes": 538,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_charging_sessions",
+        "title": "Charging sessions from history",
+        "descriptionLength": 154,
+        "descriptionBytes": 154,
+        "toolBytes": 1858,
+        "inputSchemaBytes": 538,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_car_status",
+        "title": "Get full car status",
+        "descriptionLength": 214,
+        "descriptionBytes": 214,
+        "toolBytes": 1828,
+        "inputSchemaBytes": 445,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "get_needs_attention",
+        "title": "Health warnings needing attention",
+        "descriptionLength": 143,
+        "descriptionBytes": 143,
+        "toolBytes": 1776,
+        "inputSchemaBytes": 445,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "is_car_secure",
+        "title": "Is the car closed and locked",
+        "descriptionLength": 129,
+        "descriptionBytes": 129,
+        "toolBytes": 1751,
+        "inputSchemaBytes": 445,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "list_domains",
+        "title": "List data domains",
+        "descriptionLength": 262,
+        "descriptionBytes": 262,
+        "toolBytes": 1461,
+        "inputSchemaBytes": 33,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        },
+        "required": []
+      },
+      {
+        "name": "polestar_status",
+        "title": "Server status",
+        "descriptionLength": 187,
+        "descriptionBytes": 187,
+        "toolBytes": 1363,
+        "inputSchemaBytes": 33,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true
+        },
+        "required": []
+      },
+      {
+        "name": "list_vehicles",
+        "title": "List vehicles",
+        "descriptionLength": 75,
+        "descriptionBytes": 75,
+        "toolBytes": 1270,
+        "inputSchemaBytes": 33,
+        "outputSchemaBytes": 1009,
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "required": []
+      }
+    ]
+  },
+  "calls": [
+    {
+      "name": "get_car_status",
+      "args": {},
+      "isError": false,
+      "textForReading": "Car status, YSMTEST22PL000001\n\u2022 Battery: 52% \u00b7 170 km range \u00b7 Idle \u00b7 Unplugged\n\u2022 Exterior: everything closed \u00b7 Locked \u00b7 alarm idle\n\u2022 Car is available (Asleep / not in use)\n\u2022 Odometer: 122,953 km\n\u2022 Service: in 313 days / 4150 km \u00b7 no warnings\nData as of 48 d ago (newest domain).",
+      "structuredKeys": [
+        "ok",
+        "message"
+      ],
+      "textBytes": 294,
+      "structBytes": 324,
+      "duplicatedBytes": 294,
+      "totalJSONBytes": 700
+    },
+    {
+      "name": "get_battery",
+      "args": {},
+      "isError": false,
+      "textForReading": "Vehicle YSMTEST22PL000001, telemetry/battery (data observed 48 d ago)\nCharge: 52% \u00b7 range 170 km\nCharging: Idle \u00b7 Unplugged\nAverage consumption: 20.1 kWh/100km",
+      "structuredKeys": [
+        "ok",
+        "message",
+        "vin",
+        "tool",
+        "ageSeconds"
+      ],
+      "textBytes": 161,
+      "structBytes": 256,
+      "duplicatedBytes": 161,
+      "totalJSONBytes": 496
+    },
+    {
+      "name": "get_availability",
+      "args": {},
+      "isError": false,
+      "textForReading": "Vehicle YSMTEST22PL000001, telemetry/availability (data observed 48 d ago)\nAvailability: Available \u00b7 Asleep / not in use",
+      "structuredKeys": [
+        "ok",
+        "message",
+        "vin",
+        "tool",
+        "ageSeconds"
+      ],
+      "textBytes": 121,
+      "structBytes": 219,
+      "duplicatedBytes": 121,
+      "totalJSONBytes": 417
+    },
+    {
+      "name": "get_pre_cleaning",
+      "args": {},
+      "isError": false,
+      "textForReading": "Vehicle YSMTEST22PL000001, telemetry/pre-cleaning (data observed 48 d ago)\nCabin air: PM2.5 0 \u00b5g/m\u00b3 \u00b7 pre-cleaning off\nLast cycle completed 2026-09-18T06:02:20.000Z",
+      "structuredKeys": [
+        "ok",
+        "message",
+        "vin",
+        "tool",
+        "ageSeconds"
+      ],
+      "textBytes": 167,
+      "structBytes": 266,
+      "duplicatedBytes": 167,
+      "totalJSONBytes": 511
+    },
+    {
+      "name": "polestar_status",
+      "args": {},
+      "isError": false,
+      "textForReading": "Mode: fixture (offline)\nAPI budget: 0/10000 used (10000 left), resets 2026-11-06T00:00:00.000Z\nPer-minute ceiling: 0/100 used in this minute\nBackground sampling: off, history records only what tool calls read (enable with POLESTAR_SAMPLE=on)\nCache: 5 hits + 0 stale-served of 12 reads (42%), 7 live misses, 7 refreshes, 7 entries\nToken: trusted ~60 more min",
+      "structuredKeys": [
+        "ok",
+        "message"
+      ],
+      "textBytes": 357,
+      "structBytes": 386,
+      "duplicatedBytes": 357,
+      "totalJSONBytes": 824
+    },
+    {
+      "name": "get_history",
+      "args": {
+        "domain": "telemetry/battery"
+      },
+      "isError": false,
+      "textForReading": "2026-11-05T21:03:52.474Z {\"batteryChargeLevelPercentage\":52,\"estimatedDistanceToEmptyKm\":170}",
+      "structuredKeys": [
+        "ok",
+        "message"
+      ],
+      "textBytes": 93,
+      "structBytes": 121,
+      "duplicatedBytes": 93,
+      "totalJSONBytes": 294
+    },
+    {
+      "name": "list_vehicles",
+      "args": {},
+      "isError": false,
+      "textForReading": "Authorized vehicles (1):\n  - YSMTEST22PL000001",
+      "structuredKeys": [
+        "ok",
+        "message",
+        "data"
+      ],
+      "textBytes": 46,
+      "structBytes": 323,
+      "duplicatedBytes": 46,
+      "totalJSONBytes": 446
+    },
+    {
+      "name": "list_domains",
+      "args": {},
+      "isError": false,
+      "textForReading": "15 domains (read-only; a domain a vehicle does not report answers DATA_NOT_AVAILABLE, which is not an error):\n  get_availability, /v1/vehicles/{vin}/telemetry/availability [scope pdp-telemetry/availability]\n  get_battery, /v1/vehicles/{vin}/telemetry/battery [scope pdp-telemetry/battery]\n  get_exterior, /v1/vehicles/{vin}/telemetry/exterior [scope pdp-telemetry/exterior]\n  get_health, /v1/vehicles/{vin}/telemetry/health [scope pdp-telemetry/health]\n  get_location, /v1/vehicles/{vin}/telemetry/location [scope pdp-telemetry/location]\n  get_odometer, /v1/vehicles/{vin}/telemetry/odometer [scope pdp-telemetry/odometer]\n  get_parking_climatization, /v1/vehicles/{vin}/telemetry/parking-climatization [scope pdp-telemetry/parkingClimatization]\n  get_pre_cleaning, /v1/vehicles/{vin}/telemetry/pre-cleaning [scope pdp-telemetry/preCleaning]\n  get_amp_limit, /v1/vehicles/{vin}/charging/amp-limit [scope pdp-charging/ampLimit]\n  get_charge_locations, /v1/vehicles/{vin}/charging/charge-locations [scope pdp-charging/chargeLocations]\n  get_charge_now, /v1/vehicles/{vin}/charging/charge-now [scope pdp-charging/overrideChargeTimer]\n  get_global_charge_timer, /v1/vehicles/{vin}/charging/global-charge-timer [scope pdp-charging/globalChargeTimer]\n  get_parking_climate_timer, /v1/vehicles/{vin}/charging/parking-climate-timer [scope pdp-charging/parkingClimateTimer]\n  get_target_soc, /v1/vehicles/{vin}/charging/target-soc [scope pdp-charging/targetSoc]\n  get_is_at_charge_location, /v1/vehicles/{vin}/charging/is-at-charge-location [scope pdp-charging/isAtChargeLocation]",
+      "structuredKeys": [
+        "ok",
+        "message"
+      ],
+      "textBytes": 1571,
+      "structBytes": 1610,
+      "duplicatedBytes": 1571,
+      "totalJSONBytes": 3272
+    },
+    {
+      "name": "get_battery",
+      "args": {
+        "vin": "NOTAVIN"
+      },
+      "isError": true,
+      "textForReading": "Polestar API error INVALID_VIN (HTTP 400): \"NOTAVIN\" is not a plausible VIN (17 characters, no I/O/Q). Call list_vehicles for valid VINs.\nHint: A VIN is 17 characters from the alphabet without I, O or Q. Call list_vehicles for the identifiers this credential may read.",
+      "structuredKeys": [
+        "ok",
+        "message",
+        "code",
+        "httpStatus",
+        "hint"
+      ],
+      "textBytes": 268,
+      "structBytes": 468,
+      "duplicatedBytes": 268,
+      "totalJSONBytes": 814
+    },
+    {
+      "name": "get_history",
+      "args": {
+        "domain": "telemetry/nope"
+      },
+      "isError": true,
+      "textForReading": "Polestar API error UNKNOWN_DOMAIN (HTTP 400): \"telemetry/nope\" is not a registered domain. This server records 15 domains, listed by kind/name.\nHint: That Domain is not in the registry. list_domains enumerates every one as kind/name.",
+      "structuredKeys": [
+        "ok",
+        "message",
+        "code",
+        "httpStatus",
+        "hint"
+      ],
+      "textBytes": 233,
+      "structBytes": 395,
+      "duplicatedBytes": 233,
+      "totalJSONBytes": 706
+    },
+    {
+      "name": "plan_cheapest_charge",
+      "args": {
+        "prices": [
+          {
+            "startsAt": "2026-01-01T00:00:00.000Z",
+            "price": 0.5
+          },
+          {
+            "startsAt": "2026-01-01T01:00:00.000Z",
+            "price": 0.6
+          },
+          {
+            "startsAt": "2026-01-01T02:00:00.000Z",
+            "price": 0.7
+          },
+          {
+            "startsAt": "2026-01-01T03:00:00.000Z",
+            "price": 0.8
+          },
+          {
+            "startsAt": "2026-01-01T04:00:00.000Z",
+            "price": 0.9
+          },
+          {
+            "startsAt": "2026-01-01T05:00:00.000Z",
+            "price": 1
+          },
+          {
+            "startsAt": "2026-01-01T06:00:00.000Z",
+            "price": 0.5
+          },
+          {
+            "startsAt": "2026-01-01T07:00:00.000Z",
+            "price": 0.6
+          },
+          {
+            "startsAt": "2026-01-01T08:00:00.000Z",
+            "price": 0.7
+          },
+          {
+            "startsAt": "2026-01-01T09:00:00.000Z",
+            "price": 0.8
+          },
+          {
+            "startsAt": "2026-01-01T10:00:00.000Z",
+            "price": 0.9
+          },
+          {
+            "startsAt": "2026-01-01T11:00:00.000Z",
+            "price": 1
+          },
+          {
+            "startsAt": "2026-01-01T12:00:00.000Z",
+            "price": 0.5
+          },
+          {
+            "startsAt": "2026-01-01T13:00:00.000Z",
+            "price": 0.6
+          },
+          {
+            "startsAt": "2026-01-01T14:00:00.000Z",
+            "price": 0.7
+          },
+          {
+            "startsAt": "2026-01-01T15:00:00.000Z",
+            "price": 0.8
+          },
+          {
+            "startsAt": "2026-01-01T16:00:00.000Z",
+            "price": 0.9
+          },
+          {
+            "startsAt": "2026-01-01T17:00:00.000Z",
+            "price": 1
+          },
+          {
+            "startsAt": "2026-01-01T18:00:00.000Z",
+            "price": 0.5
+          },
+          {
+            "startsAt": "2026-01-01T19:00:00.000Z",
+            "price": 0.6
+          },
+          {
+            "startsAt": "2026-01-01T20:00:00.000Z",
+            "price": 0.7
+          },
+          {
+            "startsAt": "2026-01-01T21:00:00.000Z",
+            "price": 0.8
+          },
+          {
+            "startsAt": "2026-01-01T22:00:00.000Z",
+            "price": 0.9
+          },
+          {
+            "startsAt": "2026-01-01T23:00:00.000Z",
+            "price": 1
+          }
+        ]
+      },
+      "isError": false,
+      "textForReading": "Pack capacity is unknown (the car did not report dischargeInfo.energyAvailable and no capacityKwh argument was given). Pass capacityKwh explicitly, e.g. 78 for a long range dual motor.",
+      "structuredKeys": [
+        "ok",
+        "message"
+      ],
+      "textBytes": 184,
+      "structBytes": 208,
+      "duplicatedBytes": 184,
+      "totalJSONBytes": 468
+    }
+  ],
+  "listing": {
+    "resourcesListBytes": 2800,
+    "resourcesListCount": 15,
+    "resourceTemplatesBytes": 402,
+    "resourceTemplateCount": 2,
+    "promptsBytes": 612,
+    "promptCount": 3
+  },
+  "completion": {
+    "result": {
+      "completion": {
+        "values": [
+          "YSMTEST22PL000001"
+        ],
+        "total": 1,
+        "hasMore": false
+      }
+    }
+  },
+  "resourceRead": {
+    "bytes": 277,
+    "result": {
+      "contents": [
+        {
+          "uri": "polestar://vehicle/YSMTEST22PL000001/telemetry/battery",
+          "text": "Vehicle YSMTEST22PL000001, telemetry/battery (data observed 48 d ago)\nCharge: 52% \u00b7 range 170 km\nCharging: Idle \u00b7 Unplugged\nAverage consumption: 20.1 kWh/100km",
+          "mimeType": "text/plain"
+        }
+      ]
+    }
+  },
+  "afterProbes": {
+    "toolsStillListed": 26
+  }
+}

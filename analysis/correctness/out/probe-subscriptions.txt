@@ -1,0 +1,23 @@
+{
+  "A_notify_failure": {
+    "reads": [
+      "e1",
+      "e2",
+      "e2",
+      "e2"
+    ],
+    "notified": [],
+    "note": "e2 was never delivered; later rounds see no change"
+  },
+  "B_overlapping_rounds": {
+    "reads": [
+      "e2",
+      "e2"
+    ],
+    "notified": [
+      "polestar://vehicle/YSMTEST22PL000001/telemetry/battery",
+      "polestar://vehicle/YSMTEST22PL000001/telemetry/battery"
+    ],
+    "note": "one cloud change, two notifications"
+  }
+}

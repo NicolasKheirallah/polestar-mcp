@@ -1,0 +1,2025 @@
+{
+  "result": {
+    "tools": [
+      {
+        "name": "list_vehicles",
+        "title": "List vehicles",
+        "description": "List the VINs this Polestar Data Portal credential is authorized to access.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "list_domains",
+        "title": "List data domains",
+        "description": "Every domain this server reads, with its endpoint, OAuth scope and tool name. Answer from here rather than guessing a domain name: an unknown domain is a 404 VALIDATION_RESOURCE_NOT_FOUND from the API, which is a different thing from a vehicle reporting no data.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_availability",
+        "title": "Get availability",
+        "description": "Vehicle availability: availabilityStatus and usageMode (whether the car is currently reachable/awake). (M2M endpoint: /v1/vehicles/{vin}/telemetry/availability, scope pdp-telemetry/availability).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_battery",
+        "title": "Get battery",
+        "description": "Battery state: charge level %, charging status (V1/V2/type), charger connection and power status, estimated distance to empty (km and miles), estimated time to full, and average consumption kWh/100km. The contract also defines charging current and voltage, charging power, since-charge and automatic-trip consumption averages, and an energy-consumption breakdown: those appear only when the car reports them, so a missing field means unreported, not zero. The reference vehicle answered with 14 fields and none of the optional ones. (M2M endpoint: /v1/vehicles/{vin}/telemetry/battery, scope pdp-telemetry/battery).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_exterior",
+        "title": "Get exterior",
+        "description": "Exterior state: doors, windows, hood, tailgate, tank lid (open/closed), central lock, tailgate lock, alarm. (M2M endpoint: /v1/vehicles/{vin}/telemetry/exterior, scope pdp-telemetry/exterior).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_health",
+        "title": "Get health",
+        "description": "Service health: days/distance/engine-hours to service, service warning, and fluid/light/12V warnings (brake fluid, coolant, oil, washer fluid, 19 exterior light positions). (M2M endpoint: /v1/vehicles/{vin}/telemetry/health, scope pdp-telemetry/health).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_location",
+        "title": "Get location",
+        "description": "Last known position: latitude, longitude, altitude, heading, speed, with timestamp. (M2M endpoint: /v1/vehicles/{vin}/telemetry/location, scope pdp-telemetry/location).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_odometer",
+        "title": "Get odometer",
+        "description": "Odometer meters, trip meters (manual and automatic, km), average speeds (km/h). (M2M endpoint: /v1/vehicles/{vin}/telemetry/odometer, scope pdp-telemetry/odometer).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_parking_climatization",
+        "title": "Get parking-climatization",
+        "description": "Parking climate (preheat/pre-cool): running status, runtime left, requested seat and steering-wheel heating intensities, ventilation. (M2M endpoint: /v1/vehicles/{vin}/telemetry/parking-climatization, scope pdp-telemetry/parkingClimatization).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_pre_cleaning",
+        "title": "Get pre-cleaning",
+        "description": "Cabin air pre-cleaning: running status, measured PM2.5 / air quality index, last cycle validity and completion time. (M2M endpoint: /v1/vehicles/{vin}/telemetry/pre-cleaning, scope pdp-telemetry/preCleaning).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_amp_limit",
+        "title": "Get amp-limit",
+        "description": "Configured maximum AC charging current (amps) with its source and last update, plus pendingAmpLimit when a change is recorded but the car has not confirmed it. Measured live. (M2M endpoint: /v1/vehicles/{vin}/charging/amp-limit, scope pdp-charging/ampLimit).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_charge_locations",
+        "title": "Get charge-locations",
+        "description": "Configured charge locations. Over M2M this answers as a settings record \u2014 typically only an id and a utc0 flag, not a list of addresses \u2014 so finding no coordinates is normal rather than a failure. (M2M endpoint: /v1/vehicles/{vin}/charging/charge-locations, scope pdp-charging/chargeLocations).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_charge_now",
+        "title": "Get charge-now",
+        "description": "Charge-now override state. Over M2M it typically carries only the last sync timestamp of the override, not an active/inactive boolean. (M2M endpoint: /v1/vehicles/{vin}/charging/charge-now, scope pdp-charging/overrideChargeTimer).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_global_charge_timer",
+        "title": "Get global-charge-timer",
+        "description": "Recurring charge window: start/stop hour with timezone offset, activation flag and sync status. Pending changes appear only when an edit has not yet reached the car; an empty pending block means nothing is queued. (M2M endpoint: /v1/vehicles/{vin}/charging/global-charge-timer, scope pdp-charging/globalChargeTimer).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_parking_climate_timer",
+        "title": "Get parking-climate-timer",
+        "description": "Scheduled parking-climate timers: ready-at hour, weekdays, repeat flag, activation. (M2M endpoint: /v1/vehicles/{vin}/charging/parking-climate-timer, scope pdp-charging/parkingClimateTimer).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_target_soc",
+        "title": "Get target-soc",
+        "description": "Target battery state of charge (%), setting type (CUSTOM/PRESET), last update. (M2M endpoint: /v1/vehicles/{vin}/charging/target-soc, scope pdp-charging/targetSoc).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_is_at_charge_location",
+        "title": "Get is-at-charge-location",
+        "description": "Whether the vehicle is currently at a saved charge location. Often unsupported on a vehicle (returns DATA_NOT_AVAILABLE). (M2M endpoint: /v1/vehicles/{vin}/charging/is-at-charge-location, scope pdp-charging/isAtChargeLocation).",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "raw": {
+              "description": "Return the full raw API payload instead of (or after) the humanized summary. Unchanged upstream content: it carries the VIN even when POLESTAR_REDACT_VIN is on.",
+              "type": "boolean"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_car_status",
+        "title": "Get full car status",
+        "description": "One-call status of the car: charge level and state, range, lock/doors, availability, odometer, service countdown, and data age for each. Costs several domain reads (cached); use instead of calling five get_* tools.",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "is_car_secure",
+        "title": "Is the car closed and locked",
+        "description": "True/false security check: are all doors, windows, hood and tailgate closed, central lock engaged, alarm OK? Names anything open.",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_needs_attention",
+        "title": "Health warnings needing attention",
+        "description": "Only the active warnings from the health domain (fluids, lights, 12V, service) plus the service countdown. Empty means nothing needs attention.",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_charging_estimate",
+        "title": "Charging time and energy estimate",
+        "description": "Estimates the energy and time needed to reach the target charge level from the current SoC, using the reported usable energy (dischargeInfo.energyAvailable) when available, the configured amp limit for power, and the car's own time-to-full when charging.",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            },
+            "phases": {
+              "description": "AC phases at your charger (default 3).",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "plan_cheapest_charge",
+        "title": "Plan the cheapest charge",
+        "description": "Given hourly electricity prices, computes the cheapest hours inside the car's charge window (from global-charge-timer) that deliver enough energy to reach the target charge level.",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            },
+            "prices": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "startsAt": {
+                    "type": "string"
+                  },
+                  "price": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "startsAt",
+                  "price"
+                ]
+              },
+              "description": "Hourly prices from your spot-price provider: [{startsAt: \"2026-09-19T22:00:00+02:00\", price: 0.42}, ...]"
+            },
+            "phases": {
+              "description": "AC phases at your charger (default 3, Swedish 400V three-phase).",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3
+            },
+            "capacityKwh": {
+              "description": "Usable pack capacity; auto-derived from dischargeInfo.energyAvailable when the car reports it.",
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "prices"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "polestar_status",
+        "title": "Server status",
+        "description": "Server self-report: daily API budget (used/limit/reset), per-minute ceiling, cache hit rate, token expiry, and mode. Call this if you suspect you are burning through the daily API budget.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "annotations": {
+          "readOnlyHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_history",
+        "title": "Query recorded history",
+        "description": "Raw recorded samples for one domain from the local history store (requires history to be enabled on the server). Returns one line per change, newest first.",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            },
+            "domain": {
+              "type": "string",
+              "description": "Domain as kind/name, e.g. \"telemetry/battery\"."
+            },
+            "hours": {
+              "description": "Only records newer than this many hours.",
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "limit": {
+              "description": "Max records to return (default 200).",
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "domain"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_degradation_report",
+        "title": "Battery degradation estimate",
+        "description": "Trend of the battery's implied full-charge range and implied pack capacity over recorded history (range/SoC and dischargeInfo.energyAvailable/SoC). Estimates, not verdicts, range depends on conditions. Requires history.",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            },
+            "days": {
+              "description": "Only consider the last N days.",
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "get_charging_sessions",
+        "title": "Charging sessions from history",
+        "description": "Reconstructed AC/DC charging sessions from recorded battery samples: start, duration, peak power, max SoC reached. Requires history with battery sampling.",
+        "inputSchema": {
+          "type": "object",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "vin": {
+              "description": "Vehicle Identification Number. Optional when the credential has exactly one vehicle, omit it and the only vehicle is used.",
+              "type": "string"
+            },
+            "delegated_account_id": {
+              "description": "Third-party credentials only: read the shared vehicles of this account for this call. Must be listed in POLESTAR_DELEGATED_ACCOUNT_IDS.",
+              "type": "string"
+            },
+            "days": {
+              "description": "Only consider the last N days.",
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "description": "False when the call produced no data."
+            },
+            "message": {
+              "type": "string",
+              "description": "Result text, identical to the content block."
+            },
+            "tool": {
+              "description": "Tool that produced this result.",
+              "type": "string"
+            },
+            "vin": {
+              "description": "Vehicle the result is about, masked when POLESTAR_REDACT_VIN is on.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Structured payload; shape documented per tool."
+            },
+            "ageSeconds": {
+              "description": "Staleness of the underlying telemetry.",
+              "type": "number",
+              "minimum": 0
+            },
+            "code": {
+              "description": "Machine-readable error code when ok is false.",
+              "type": "string"
+            },
+            "httpStatus": {
+              "description": "Upstream HTTP status when ok is false.",
+              "type": "number"
+            },
+            "requestId": {
+              "description": "Upstream request id, the handle support needs.",
+              "type": "string"
+            },
+            "hint": {
+              "description": "Actionable guidance when ok is false.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ]
+  },
+  "jsonrpc": "2.0",
+  "id": 2
+}

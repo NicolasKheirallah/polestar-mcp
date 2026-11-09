@@ -1,0 +1,42 @@
+{
+  "A_scarce_window": {
+    "feasible": true,
+    "reason": "Window too short for one contiguous block, fell back to cheapest individual hours.",
+    "energyNeededKwh": 64,
+    "hoursNeeded": 6.4,
+    "steps": 2,
+    "energyPlannedKwh": 18.285714285714285,
+    "shortfallKwh": 45.71
+  },
+  "B_negative_prices": {
+    "feasible": true,
+    "steps": 3,
+    "stepPrices": [
+      -0.1,
+      -0.1,
+      -0.1
+    ],
+    "sumPriceXEnergy": -2.4
+  },
+  "C_stop_hour_28": {
+    "plannedLocalHours": [
+      22,
+      23,
+      22
+    ],
+    "plannedUtcTimes": [
+      "2026-01-01T22:00:00.000Z",
+      "2026-01-01T23:00:00.000Z",
+      "2026-01-02T22:00:00.000Z"
+    ],
+    "note": "window 22:00-28:00 means 22:00-04:00; 00:00-03:00 never appears"
+  },
+  "D_named_fallback_test": {
+    "feasible": true,
+    "reason": null,
+    "steps": 1,
+    "hoursNeeded": 0.9,
+    "testAssertionWouldPass": true,
+    "fellBackToIndividualHours": false
+  }
+}

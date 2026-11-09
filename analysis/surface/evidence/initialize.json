@@ -1,0 +1,26 @@
+{
+  "result": {
+    "protocolVersion": "2025-06-18",
+    "capabilities": {
+      "resources": {
+        "subscribe": true,
+        "listChanged": true
+      },
+      "logging": {},
+      "tools": {
+        "listChanged": true
+      },
+      "completions": {},
+      "prompts": {
+        "listChanged": true
+      }
+    },
+    "serverInfo": {
+      "name": "polestar-mcp",
+      "version": "0.3.0"
+    },
+    "instructions": "Polestar Data Portal (M2M) is READ-ONLY: every tool is a GET, no command is sent to the car. Start with list_vehicles. On a credential that sees exactly one vehicle the vin argument may be omitted. Domain data is reported by the car, not by the API: fields are absent when unreported, and a whole domain can answer DATA_NOT_AVAILABLE. That is normal, not an error. Prefer get_car_status or is_car_secure or get_needs_attention or get_charging_estimate over the 15 individual domain reads; every live call spends a shared allowance of 10,000 calls/day and 100/minute, and polestar_status reports what is left. Every payload carries an age: charging configuration can be days old while telemetry is minutes old, so read the age before treating a value as current. Errors come back as structured JSON with a code, httpStatus and requestId. Quote the requestId when reporting a problem."
+  },
+  "jsonrpc": "2.0",
+  "id": 1
+}

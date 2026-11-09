@@ -1,0 +1,98 @@
+{
+  "result": {
+    "resources": [
+      {
+        "description": "telemetry/availability for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/telemetry/availability",
+        "name": "availability (\u20260001)"
+      },
+      {
+        "description": "telemetry/battery for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/telemetry/battery",
+        "name": "battery (\u20260001)"
+      },
+      {
+        "description": "telemetry/exterior for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/telemetry/exterior",
+        "name": "exterior (\u20260001)"
+      },
+      {
+        "description": "telemetry/health for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/telemetry/health",
+        "name": "health (\u20260001)"
+      },
+      {
+        "description": "telemetry/location for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/telemetry/location",
+        "name": "location (\u20260001)"
+      },
+      {
+        "description": "telemetry/odometer for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/telemetry/odometer",
+        "name": "odometer (\u20260001)"
+      },
+      {
+        "description": "telemetry/parking-climatization for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/telemetry/parking-climatization",
+        "name": "parking-climatization (\u20260001)"
+      },
+      {
+        "description": "telemetry/pre-cleaning for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/telemetry/pre-cleaning",
+        "name": "pre-cleaning (\u20260001)"
+      },
+      {
+        "description": "charging/amp-limit for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/charging/amp-limit",
+        "name": "amp-limit (\u20260001)"
+      },
+      {
+        "description": "charging/charge-locations for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/charging/charge-locations",
+        "name": "charge-locations (\u20260001)"
+      },
+      {
+        "description": "charging/charge-now for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/charging/charge-now",
+        "name": "charge-now (\u20260001)"
+      },
+      {
+        "description": "charging/global-charge-timer for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/charging/global-charge-timer",
+        "name": "global-charge-timer (\u20260001)"
+      },
+      {
+        "description": "charging/parking-climate-timer for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/charging/parking-climate-timer",
+        "name": "parking-climate-timer (\u20260001)"
+      },
+      {
+        "description": "charging/target-soc for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/charging/target-soc",
+        "name": "target-soc (\u20260001)"
+      },
+      {
+        "description": "charging/is-at-charge-location for vehicle \u20260001",
+        "mimeType": "text/plain",
+        "uri": "polestar://vehicle/YSMTEST22PL000001/charging/is-at-charge-location",
+        "name": "is-at-charge-location (\u20260001)"
+      }
+    ]
+  },
+  "jsonrpc": "2.0",
+  "id": 14
+}

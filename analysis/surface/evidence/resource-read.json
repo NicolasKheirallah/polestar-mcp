@@ -1,0 +1,13 @@
+{
+  "result": {
+    "contents": [
+      {
+        "uri": "polestar://vehicle/YSMTEST22PL000001/telemetry/battery",
+        "text": "Vehicle YSMTEST22PL000001, telemetry/battery (data observed 48 d ago)\nCharge: 52% \u00b7 range 170 km\nCharging: Idle \u00b7 Unplugged\nAverage consumption: 20.1 kWh/100km",
+        "mimeType": "text/plain"
+      }
+    ]
+  },
+  "jsonrpc": "2.0",
+  "id": 18
+}

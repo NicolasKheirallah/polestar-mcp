@@ -1,0 +1,10 @@
+{
+  "list_vehicles_declared_args": [],
+  "caller_passed": {
+    "delegated_account_id": "partner-a"
+  },
+  "client_calls": [
+    "owner.vehicles"
+  ],
+  "resultText": "Authorized vehicles (1):\n  - YSMTEST22PL000001"
+}

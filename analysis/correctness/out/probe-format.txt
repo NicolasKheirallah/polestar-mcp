@@ -1,0 +1,21 @@
+{
+  "latent_nan_and_infinity": {
+    "pct_NaN": "NaN%",
+    "pct_Infinity": "Infinity%",
+    "distance_NaN_km": "NaN km",
+    "distance_Infinity_mi": "Infinity km (Infinity mi)",
+    "fromKm_NaN_mi": "NaN mi",
+    "km_Infinity_mi": "∞ mi",
+    "formatAge_NaN": "NaN d ago"
+  },
+  "corrupt_timestamp": {
+    "epochSecondsMs": 1e+23,
+    "observedAtMs": 1e+23,
+    "formatAgeOfIt": "0s ago",
+    "note": "a timestamp 3e12 years in the future reports as fresh (\"0s ago\") instead of unknown"
+  },
+  "corrupt_timestamp_summarizer": {
+    "summarizeError": "RangeError: Invalid time value",
+    "note": "summarizeDomain throws instead of saying the timestamp is unusable; a domain tool turns this into INTERNAL_ERROR"
+  }
+}

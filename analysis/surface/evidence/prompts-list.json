@@ -1,0 +1,45 @@
+{
+  "result": {
+    "prompts": [
+      {
+        "name": "car-status",
+        "title": "Car status briefing",
+        "description": "A one-glance briefing: charge, range, security, and anything needing attention.",
+        "arguments": [
+          {
+            "name": "vin",
+            "required": false
+          }
+        ]
+      },
+      {
+        "name": "charge-plan",
+        "title": "Cheapest charge plan",
+        "description": "Plan the cheapest charging hours for tonight given spot prices.",
+        "arguments": [
+          {
+            "name": "vin",
+            "required": false
+          },
+          {
+            "name": "prices",
+            "required": false
+          }
+        ]
+      },
+      {
+        "name": "battery-health-report",
+        "title": "Battery health report",
+        "description": "Degradation and charging-session report from recorded history.",
+        "arguments": [
+          {
+            "name": "vin",
+            "required": false
+          }
+        ]
+      }
+    ]
+  },
+  "jsonrpc": "2.0",
+  "id": 16
+}

@@ -1,0 +1,14 @@
+{
+  "403_AUTHZ_CLIENT_ID_MISMATCH": {
+    "get_battery_hint": "this domain needs the OAuth scope `pdp-telemetry/battery` on the credential",
+    "get_car_status_hint": "x-client-id carried the OAuth client id. Set POLESTAR_ACCOUNT_ID to the Account ID shown next to the Base URL in the Data Portal."
+  },
+  "403_AUTHZ_VIN_UNAUTHORIZED": {
+    "get_battery_hint": "this domain needs the OAuth scope `pdp-telemetry/battery` on the credential",
+    "get_car_status_hint": "This credential cannot see that VIN. Call list_vehicles for the authorized set; the API answers the same way for a malformed VIN, so check the characters too."
+  },
+  "plain_401": {
+    "code": "HTTP_401",
+    "hint": "Report the requestId with the tool you called; this code is not one this server documents."
+  }
+}

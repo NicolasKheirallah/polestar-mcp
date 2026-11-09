@@ -1,0 +1,38 @@
+[
+  {
+    "label": "HTTP-date in the future",
+    "header": "Tue, 01 Jan 2030 00:00:00 GMT",
+    "waits": [
+      500
+    ],
+    "calls": 2,
+    "finalStatus": 200
+  },
+  {
+    "label": "negative integer",
+    "header": "-5",
+    "waits": [
+      -5000
+    ],
+    "calls": 2,
+    "finalStatus": 200
+  },
+  {
+    "label": "integer seconds",
+    "header": "30",
+    "waits": [
+      30000
+    ],
+    "calls": 2,
+    "finalStatus": 200
+  },
+  {
+    "label": "non-numeric",
+    "header": "soon",
+    "waits": [
+      500
+    ],
+    "calls": 2,
+    "finalStatus": 200
+  }
+]

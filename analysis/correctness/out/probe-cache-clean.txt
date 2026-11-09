@@ -1,0 +1,22 @@
+{
+  "concurrent_misses": {
+    "liveCalls": 1,
+    "hits": 0,
+    "misses": 3,
+    "refreshes": 1
+  },
+  "ttl_boundary": {
+    "justInsideTtlLiveCalls": 1,
+    "atExactBoundaryLiveCalls": 2,
+    "staleServed": 1
+  },
+  "cross_vin": {
+    "liveCalls": 2,
+    "note": "different VIN -> different URL key -> no sharing"
+  },
+  "stale_single_flight": {
+    "staleBody": "old",
+    "liveCalls": 2,
+    "staleServed": 2
+  }
+}

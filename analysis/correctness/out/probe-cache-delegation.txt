@@ -1,0 +1,27 @@
+{
+  "ownerVehicles": [
+    "YSMTEST22PL000001"
+  ],
+  "callsAfterOwnerVehicles": 2,
+  "partnerVehicles": [
+    "YSMTEST22PL000001"
+  ],
+  "callsAfterPartnerVehicles": 2,
+  "vehicleCalls": [
+    {
+      "url": "https://api.test/m2m/v1/vehicles"
+    }
+  ],
+  "partnerResolvedVin": "YSMTEST22PL000001",
+  "ownerResolvedVin": "YSMTEST22PL000001",
+  "partnerBattery": {
+    "vin": "YSM-PARTNER-VIN-01",
+    "batteryChargeLevelPercentage": 42
+  },
+  "callsAfterPartnerBattery": 3,
+  "ownerBatteryAfterPartner": {
+    "vin": "YSM-PARTNER-VIN-01",
+    "batteryChargeLevelPercentage": 42
+  },
+  "callsAfterOwnerBattery": 3
+}

@@ -1,0 +1,334 @@
+{
+  "full": {
+    "label": "full",
+    "fixture": "/Users/nicolaskheirallah/Documents/GitHub/polestar-mcp/test/fixtures/dump",
+    "calls": [
+      {
+        "name": "get_battery",
+        "args": {
+          "raw": true
+        },
+        "isError": false,
+        "text": "Vehicle YSMTEST22PL000001, telemetry/battery (data observed 48 d ago)\nCharge: 52% \u00b7 range 170 km\nCharging: Idle \u00b7 Unplugged\nAverage consumption: 20.1 kWh/100km\n\nRaw payload:\n{\n  \"averageEnergyConsumptionKwhPer100Km\": 20.1,\n  \"batteryChargeLevelPercentage\": 52,\n  \"chargerConnectionStatus\": \"CHARGER_CONNECTION_STATUS_DISCONNECTED\",\n  \"chargerPowerStatus\": \"CHARGER_POWER_STATUS_NO_POWER_AVAILABLE\",\n  \"chargingStatus\": \"CHARGING_STATUS_IDLE\",\n  \"chargingStatusV2\": \"CHARGING_STATUS_V2_IDLE\",\n  \"chargingType\": \"CHARGING_TYPE_NONE\",\n  \"estimatedChargingTimeToFullMinutes\": 0,\n  \"estimatedDistanceToEmptyKm\": 170,\n  \"estimatedDistanceToEmptyMiles\": 100,\n  \"metaEventId\": \"shardId-000000000000:00000000000000000000000000000000000000000000000000000000\",\n  \"metaReceivedAt\": \"2026-09-18T11:10:55.531Z\",\n  \"timestamp\": {\n    \"nanos\": 818764407,\n    \"seconds\": \"1789729847\"\n  },\n  \"vin\": \"YSMTEST22PL000001\"\n}",
+        "textBytes": 904,
+        "structBytes": 1734,
+        "structKeys": [
+          "ok",
+          "message",
+          "vin",
+          "tool",
+          "ageSeconds",
+          "data"
+        ],
+        "dataBytes": 656,
+        "rawPayloadInText": true,
+        "totalBytes": 2772
+      },
+      {
+        "name": "get_battery",
+        "args": {},
+        "isError": false,
+        "text": "Vehicle YSMTEST22PL000001, telemetry/battery (data observed 48 d ago)\nCharge: 52% \u00b7 range 170 km\nCharging: Idle \u00b7 Unplugged\nAverage consumption: 20.1 kWh/100km",
+        "textBytes": 161,
+        "structBytes": 256,
+        "structKeys": [
+          "ok",
+          "message",
+          "vin",
+          "tool",
+          "ageSeconds"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 480
+      },
+      {
+        "name": "get_charging_estimate",
+        "args": {},
+        "isError": false,
+        "text": "Usable-energy data not reported; showing the car's own estimate instead.\nAssumptions: power estimated from 20 A \u00d7 230 V assumed \u00d7 3 phase(s); the car reports no charging voltage.",
+        "textBytes": 180,
+        "structBytes": 205,
+        "structKeys": [
+          "ok",
+          "message"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 446
+      },
+      {
+        "name": "is_car_secure",
+        "args": {},
+        "isError": false,
+        "text": "Yes, car is secure (locked, all closed). Alarm: idle.",
+        "textBytes": 53,
+        "structBytes": 77,
+        "structKeys": [
+          "ok",
+          "message"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 190
+      },
+      {
+        "name": "get_needs_attention",
+        "args": {},
+        "isError": false,
+        "text": "Nothing needs attention, all health checks report OK.\nNext service in 313 days or 4150 km (whichever first).",
+        "textBytes": 108,
+        "structBytes": 133,
+        "structKeys": [
+          "ok",
+          "message"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 302
+      },
+      {
+        "name": "get_car_status",
+        "args": {},
+        "isError": false,
+        "text": "Car status, YSMTEST22PL000001\n\u2022 Battery: 52% \u00b7 170 km range \u00b7 Idle \u00b7 Unplugged\n\u2022 Exterior: everything closed \u00b7 Locked \u00b7 alarm idle\n\u2022 Car is available (Asleep / not in use)\n\u2022 Odometer: 122,953 km\n\u2022 Service: in 313 days / 4150 km \u00b7 no warnings\nData as of 48 d ago (newest domain).",
+        "textBytes": 294,
+        "structBytes": 324,
+        "structKeys": [
+          "ok",
+          "message"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 684
+      },
+      {
+        "name": "get_is_at_charge_location",
+        "args": {},
+        "isError": false,
+        "text": "No is-at-charge-location data is available for vehicle YSMTEST22PL000001 (the API returned DATA_NOT_AVAILABLE, this vehicle does not report this domain).",
+        "textBytes": 153,
+        "structBytes": 238,
+        "structKeys": [
+          "ok",
+          "message",
+          "vin",
+          "tool"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 451
+      },
+      {
+        "name": "get_location",
+        "args": {},
+        "isError": false,
+        "text": "Vehicle YSMTEST22PL000001, telemetry/location (data observed 48 d ago)\nPosition: 47.60620, -122.33210 (heading 121\u00b0, 0 km/h)\nMap: https://www.google.com/maps?q=47.6062,-122.3321",
+        "textBytes": 178,
+        "structBytes": 273,
+        "structKeys": [
+          "ok",
+          "message",
+          "vin",
+          "tool",
+          "ageSeconds"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 513
+      },
+      {
+        "name": "get_battery",
+        "args": {
+          "delegated_account_id": "nope"
+        },
+        "isError": true,
+        "text": "Polestar API error DELEGATION_NOT_ALLOWED (HTTP 403): delegated_account_id \"nope\" is not in POLESTAR_DELEGATED_ACCOUNT_IDS, so it was not sent.\nHint: List the account in POLESTAR_DELEGATED_ACCOUNT_IDS to let callers switch to it; the API does not reject an unknown delegation, so this server checks it.",
+        "textBytes": 302,
+        "structBytes": 541,
+        "structKeys": [
+          "ok",
+          "message",
+          "code",
+          "httpStatus",
+          "hint"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 906
+      }
+    ],
+    "toolCount": 26
+  },
+  "missing": {
+    "label": "health+exterior+is-at-charge-location deleted",
+    "fixture": "/var/folders/2c/gtx7b68d5rd5q3dv_7s6twlc0000gn/T/polestar-partial-fxO87h",
+    "calls": [
+      {
+        "name": "get_battery",
+        "args": {
+          "raw": true
+        },
+        "isError": false,
+        "text": "Vehicle YSMTEST22PL000001, telemetry/battery (data observed 48 d ago)\nCharge: 52% \u00b7 range 170 km\nCharging: Idle \u00b7 Unplugged\nAverage consumption: 20.1 kWh/100km\n\nRaw payload:\n{\n  \"averageEnergyConsumptionKwhPer100Km\": 20.1,\n  \"batteryChargeLevelPercentage\": 52,\n  \"chargerConnectionStatus\": \"CHARGER_CONNECTION_STATUS_DISCONNECTED\",\n  \"chargerPowerStatus\": \"CHARGER_POWER_STATUS_NO_POWER_AVAILABLE\",\n  \"chargingStatus\": \"CHARGING_STATUS_IDLE\",\n  \"chargingStatusV2\": \"CHARGING_STATUS_V2_IDLE\",\n  \"chargingType\": \"CHARGING_TYPE_NONE\",\n  \"estimatedChargingTimeToFullMinutes\": 0,\n  \"estimatedDistanceToEmptyKm\": 170,\n  \"estimatedDistanceToEmptyMiles\": 100,\n  \"metaEventId\": \"shardId-000000000000:00000000000000000000000000000000000000000000000000000000\",\n  \"metaReceivedAt\": \"2026-09-18T11:10:55.531Z\",\n  \"timestamp\": {\n    \"nanos\": 818764407,\n    \"seconds\": \"1789729847\"\n  },\n  \"vin\": \"YSMTEST22PL000001\"\n}",
+        "textBytes": 904,
+        "structBytes": 1734,
+        "structKeys": [
+          "ok",
+          "message",
+          "vin",
+          "tool",
+          "ageSeconds",
+          "data"
+        ],
+        "dataBytes": 656,
+        "rawPayloadInText": true,
+        "totalBytes": 2772
+      },
+      {
+        "name": "get_battery",
+        "args": {},
+        "isError": false,
+        "text": "Vehicle YSMTEST22PL000001, telemetry/battery (data observed 48 d ago)\nCharge: 52% \u00b7 range 170 km\nCharging: Idle \u00b7 Unplugged\nAverage consumption: 20.1 kWh/100km",
+        "textBytes": 161,
+        "structBytes": 256,
+        "structKeys": [
+          "ok",
+          "message",
+          "vin",
+          "tool",
+          "ageSeconds"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 480
+      },
+      {
+        "name": "get_charging_estimate",
+        "args": {},
+        "isError": false,
+        "text": "Usable-energy data not reported; showing the car's own estimate instead.\nAssumptions: power estimated from 20 A \u00d7 230 V assumed \u00d7 3 phase(s); the car reports no charging voltage.",
+        "textBytes": 180,
+        "structBytes": 205,
+        "structKeys": [
+          "ok",
+          "message"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 446
+      },
+      {
+        "name": "is_car_secure",
+        "args": {},
+        "isError": true,
+        "text": "Polestar API error NOT_FOUND (HTTP 404): No fixture response: missing telemetry/exterior fixture.\nHint: Report the requestId with the tool you called; this code is not one this server documents.",
+        "textBytes": 194,
+        "structBytes": 356,
+        "structKeys": [
+          "ok",
+          "message",
+          "code",
+          "httpStatus",
+          "hint"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 611
+      },
+      {
+        "name": "get_needs_attention",
+        "args": {},
+        "isError": true,
+        "text": "Polestar API error NOT_FOUND (HTTP 404): No fixture response: missing telemetry/health fixture.\nHint: Report the requestId with the tool you called; this code is not one this server documents.",
+        "textBytes": 192,
+        "structBytes": 354,
+        "structKeys": [
+          "ok",
+          "message",
+          "code",
+          "httpStatus",
+          "hint"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 607
+      },
+      {
+        "name": "get_car_status",
+        "args": {},
+        "isError": true,
+        "text": "Polestar API error NOT_FOUND (HTTP 404): No fixture response: missing telemetry/exterior fixture.\nHint: Report the requestId with the tool you called; this code is not one this server documents.",
+        "textBytes": 194,
+        "structBytes": 356,
+        "structKeys": [
+          "ok",
+          "message",
+          "code",
+          "httpStatus",
+          "hint"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 611
+      },
+      {
+        "name": "get_is_at_charge_location",
+        "args": {},
+        "isError": true,
+        "text": "Polestar API error NOT_FOUND (HTTP 404): No fixture response: missing charging/is-at-charge-location fixture.\nHint: Report the requestId with the tool you called; this code is not one this server documents.",
+        "textBytes": 206,
+        "structBytes": 368,
+        "structKeys": [
+          "ok",
+          "message",
+          "code",
+          "httpStatus",
+          "hint"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 635
+      },
+      {
+        "name": "get_location",
+        "args": {},
+        "isError": false,
+        "text": "Vehicle YSMTEST22PL000001, telemetry/location (data observed 48 d ago)\nPosition: 47.60620, -122.33210 (heading 121\u00b0, 0 km/h)\nMap: https://www.google.com/maps?q=47.6062,-122.3321",
+        "textBytes": 178,
+        "structBytes": 273,
+        "structKeys": [
+          "ok",
+          "message",
+          "vin",
+          "tool",
+          "ageSeconds"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 513
+      },
+      {
+        "name": "get_battery",
+        "args": {
+          "delegated_account_id": "nope"
+        },
+        "isError": true,
+        "text": "Polestar API error DELEGATION_NOT_ALLOWED (HTTP 403): delegated_account_id \"nope\" is not in POLESTAR_DELEGATED_ACCOUNT_IDS, so it was not sent.\nHint: List the account in POLESTAR_DELEGATED_ACCOUNT_IDS to let callers switch to it; the API does not reject an unknown delegation, so this server checks it.",
+        "textBytes": 302,
+        "structBytes": 541,
+        "structKeys": [
+          "ok",
+          "message",
+          "code",
+          "httpStatus",
+          "hint"
+        ],
+        "dataBytes": 0,
+        "rawPayloadInText": false,
+        "totalBytes": 906
+      }
+    ],
+    "toolCount": 26
+  }
+}
