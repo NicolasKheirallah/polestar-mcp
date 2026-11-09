@@ -49,9 +49,6 @@ All notable changes to this project. The format follows
   floor, the new scripts and the new CI jobs; `package.json` ships `docs/` and `mcpb/` so the
   packaged README links resolve.
 
-- `list_vehicle_domains`, which reports for one vehicle whether each of the 15 domains is
-  reported, absent or failed, with the data age when reported; it costs up to one cached read
-  per domain on a cold cache.
 - `get_charging_setup`, one cached call over the seven charging settings, each with its data
   age and with unreported settings named rather than omitted.
 - `get_departure_readiness`, which answers whether the car can be charged to its target and
@@ -91,6 +88,11 @@ All notable changes to this project. The format follows
   it carries the data age, the owner label and the VIN redaction rule it lacked, and a
   domain the car does not report reads the same through both surfaces.
 
+- HTTP mode serves both protocol eras from one listener through the SDK's handler entry:
+  2025-era clients keep the stateless per-request path, and 2026-07-28 clients get the
+  per-request envelope, `server/discover` and the modern tool listing from the same registry.
+  stdio keeps the 2025 handshake. A modern request without its envelope is refused with the
+  missing keys named rather than silently downgraded.
 - The Node floor is now `>=20.11.0` because `scripts/capture.ts`,
   `scripts/verify-fixtures.mjs` and `scripts/server-for-inspector.ts` use
   `import.meta.dirname`; the README badge, getting started, development notes and the

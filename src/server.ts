@@ -4,9 +4,9 @@ import { homedir } from 'node:os';
 import { realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { McpServer, ProtocolError, ProtocolErrorCode, ResourceTemplate } from "@modelcontextprotocol/server";
+import { createMcpHandler, McpServer, ProtocolError, ProtocolErrorCode, ResourceTemplate } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
-import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
+import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { TokenProvider } from './auth.js';
 import { BudgetMeter, MinuteWindowMeter } from './budget.js';
@@ -631,6 +631,14 @@ export interface HttpHandlerOptions {
 export function createHttpHandler(engine: Engine, bind: BindSuccess, options: HttpHandlerOptions = {}): (req: IncomingMessage, res: ServerResponse) => void {
   const token = bind.token;
   const maxRequestBytes = options.maxRequestBytes ?? MAX_HTTP_REQUEST_BYTES;
+  const handler = createMcpHandler(
+    () => createMcpServer(engine, { subscriptions: false }).server,
+    { legacy: 'stateless', maxRequestBodySize: maxRequestBytes },
+  );
+  const nodeHandler = toNodeHandler(handler, {
+    maxRequestBodySize: maxRequestBytes,
+    onerror: (err) => engine.log(`HTTP adapter failure: ${err.message}`),
+  });
   return (req: IncomingMessage, res: ServerResponse) => {
     const guard = decideHttpRequest({
       boundHost: bind.host,
@@ -655,35 +663,21 @@ export function createHttpHandler(engine: Engine, bind: BindSuccess, options: Ht
       res.writeHead(413, { 'content-type': 'application/json', connection: 'close' }).end(payloadTooLargeBody(maxRequestBytes));
       return;
     }
-    // Stateless mode: each request is an independent JSON-RPC exchange over one
-    // shared engine (cache, budget, history). Tools, resources and prompts are
-    // served; subscriptions are not, and the surface below says so in its
-    // capabilities, because the surface that would poll is closed with this
-    // response and its notification channel goes with it.
-    //
-    // One surface per request is deliberate. Measured on this tree (Node 22,
-    // fixture engine, 200 iterations, registry of 26 tools): createMcpServer
-    // costs median 0.19 ms / p95 1.10 ms, and a whole stateless initialize POST
-    // costs median 0.48 ms / p95 1.74 ms. Building the tool-spec families is
-    // 0.029 ms of that, about 6% of one request; the McpServer construction and
-    // its registrations are the rest and cannot be shared because the instance
-    // holds this request's protocol state. A cached spec array would therefore
-    // buy a few percent while adding an engine-keyed cache whose invalidation
-    // would need its own tests, so it is not done; revisit if registration cost
-    // grows with the registry.
-    void (async () => {
-      const transport = new NodeStreamableHTTPServerTransport({
-        enableJsonResponse: true,
-        maxRequestBodySize: maxRequestBytes,
-      });
-      const surface = createMcpServer(engine, { subscriptions: false });
-      res.on('close', () => {
-        void transport.close();
-        void surface.close();
-      });
-      await surface.server.connect(transport as unknown as Parameters<typeof surface.server.connect>[0]);
-      await transport.handleRequest(req, res);
-    })().catch((err: unknown) => {
+    // Serving goes through the SDK's handler entry, which owns both eras: a
+    // legacy 2025 request is answered per request by a fresh surface (the
+    // stateless idiom this mode has always used), and a modern 2026-07-28
+    // request is served with its per-request envelope. One surface per request
+    // is deliberate and measured: createMcpServer costs median 0.19 ms / p95
+    // 1.10 ms, and a whole initialize POST median 0.48 ms / p95 1.74 ms, so the
+    // fresh instance is cheap next to the protocol exchange. The handler itself
+    // is created once per server, because it owns the modern stream router.
+    // The adapter's Node types require a defined method; Node always sets one
+    // for a request it hands to a listener, and the adapter only needs the
+    // shape it reads.
+    void nodeHandler(
+      req as unknown as Parameters<typeof nodeHandler>[0],
+      res as unknown as Parameters<typeof nodeHandler>[1],
+    ).catch((err: unknown) => {
       engine.log(`HTTP request failed: ${err instanceof Error ? err.message : err}`);
       if (!res.headersSent) res.writeHead(500).end();
     });
