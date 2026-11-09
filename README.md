@@ -16,6 +16,8 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for the [Pole
 
 Ask "how is my car doing?" and the assistant calls one tool, reads one cached answer, and tells you the charge level, the range, whether everything is locked, and how old each number is. Ask "when will it be charged?" or "plan the cheapest charging for tonight" and it estimates or plans from the car's own configuration.
 
+The API only answers "what is true right now". With the optional local history store switched on, the same server also answers what the API cannot: how the battery has aged, what each charging session cost, which trips the odometer implies, which warnings appeared or cleared, and a weekly digest of the car's week.
+
 Every answer is a read. Polestar's documented v1 API publishes no write endpoints, so there is nothing here that can lock your car, start the climate, or change a charge limit. Every tool carries the MCP `readOnlyHint`, so clients can auto-approve it.
 
 > [!IMPORTANT]
@@ -34,6 +36,9 @@ Every answer is a read. Polestar's documented v1 API publishes no write endpoint
 | "How has the battery aged?" | `get_degradation_report` | Capacity and range trends (needs history, see below) |
 | "What is my charging setup?" | `get_charging_setup` | The seven charging settings in one answer, each with its age |
 | "Will the car be ready by Sunday at 14:00?" | `get_departure_readiness` | A yes or no with the charge deadline, or a refusal when the timer cannot support it |
+| "What did charging cost me?" | `get_charging_cost` | Energy, cost and stated assumptions for each recorded charging session (needs history) |
+| "What did I drive this week?" | `get_trips` | Trips rebuilt from odometer history, with gaps and resets named (needs history) |
+| "Catch me up on the week" | `get_weekly_digest` | Distance, charge, warnings and settings changes in one answer (needs history) |
 
 Domain tools answer in short prose with the data age in the header, and `raw: true` appends the untouched API payload. A successful result sends that text once plus structured data where a tool has one; `structuredContent.message` is used on failures, not on success.
 
@@ -53,7 +58,7 @@ Average consumption: 20.1 kWh/100km
 The repository ships a sanitized captured dump under `test/fixtures/dump`, and the demo asserts real values through the full server, token flow included:
 
 ```sh
-npm install
+npm ci
 npm run build
 npm run demo                               # offline demo against the shipped dump, prints DUMP_OK
 POLESTAR_FIXTURES_DIR=test/fixtures/dump npm start   # serve the shipped dump interactively
@@ -186,6 +191,8 @@ Three dials control what leaves your car and how it is named:
 
 Set `POLESTAR_HTTP_PORT=8420 npm start` and the same engine serves tools, resources, and prompts over stateless Streamable HTTP: each request is independent, while cache, budget, and history are shared. It binds `127.0.0.1` by default; binding any other address requires `POLESTAR_HTTP_TOKEN`, because a server that reads vehicle location must not sit unauthenticated on a shared network. Browser cross-origin requests are refused unless the `Origin` matches the request host or appears in `POLESTAR_HTTP_ALLOWED_ORIGINS`; a forged `Host` is refused the same way. Resources work in both modes. Subscriptions do not: a stateless request's surface is closed as its response ends, so a poller would be stopped before its first tick, and the server answers `resources/subscribe` with an error and advertises `subscribe: false` in the handshake rather than accepting one that can never fire. Use stdio for subscriptions.
 
+Both protocol eras are served from one listener. A 2025-era client gets the stateless legacy path; a `2026-07-28` client gets `server/discover` plus the per-request envelope, with the same 26-tool default surface (36 with history enabled). A modern request missing its envelope is refused by name, never silently downgraded to the legacy path.
+
 <details>
 <summary><strong>Full configuration reference (29 variables)</strong></summary>
 
@@ -228,18 +235,22 @@ The server knows exactly which variables it reads and warns about unrecognized o
 ## Development
 
 ```sh
-npm install
-npm run build          # strict TypeScript, emits build/server.js
-npm test               # unit suites: token lifecycle, client, runtime, planner, config registry
-npm run smoke          # stdio end-to-end: registry, tools, resources, prompts, history
-npm run smoke-http     # Streamable HTTP end-to-end over plain POSTs
-npm run demo           # offline demo against the shipped synthetic dump, prints DUMP_OK
-npm run demo-dump      # stdio end-to-end against the shipped dump; set POLESTAR_FIXTURES_DIR for a real capture
-npm run coverage       # unit suite with the lines 90, branches 80, functions 85 floors
-npm run check-secrets  # secret-hygiene check
-npm run check-version  # one version across package.json, server.json, README, CHANGELOG, release note
-npm run check-server-json  # MCP Registry metadata shape
+npm ci
 npm run typecheck      # types src, test, and scripts together
+npm run build          # strict TypeScript, emits build/server.js
+npm test               # unit and integration suites
+npm run coverage       # the same suite with the lines 90, branches 80, functions 85 floors
+npm run smoke          # stdio end to end: registry, tools, resources, prompts, history
+npm run smoke-http     # Streamable HTTP end to end over plain POSTs
+npm run smoke-bin      # the published bin path: --version, --help, handshake
+npm run demo           # offline demo against the shipped synthetic dump, prints DUMP_OK
+npm run demo-dump      # contributor demo; set POLESTAR_FIXTURES_DIR for a real capture
+npm run verify-fixtures  # every domain has a valid Envelope fixture
+npm run check-secrets  # credential, VIN, email, phone and coordinate scan
+npm run check-tool-refs  # prose never names a tool the registry lacks
+npm run check-version  # one version across the six documented locations
+npm run check-server-json  # MCP Registry metadata shape
+node docs/check-docs.mjs <tools|envvars|links|hygiene>  # documentation gates
 ```
 
 Requires Node 20.11 or newer. The suite covers what is easy to get subtly wrong: token single-flight and expiry skew, envelope unwrapping and identity checks, VIN resolution and delegation, cache TTLs and stale-while-revalidate, retry and budget metering, the charge-window planner (including windows that wrap midnight), history dedup and session reconstruction, and the configuration registry.
