@@ -152,6 +152,15 @@ function checkEmDash() {
 }
 
 // links: every local markdown link, including its #anchor, resolves
+/**
+ * Markdown links written inside code are examples, not links. A document that
+ * quotes a broken link to prove a detector is blind should not itself fail the
+ * detector, and a fenced sample of config is not a navigation claim. Fenced
+ * blocks go first, because an inline-span pattern would eat their fences.
+ */
+function withoutCode(text) {
+  return text.replace(/```[\s\S]*?```/g, '').replace(/~~~[\s\S]*?~~~/g, '').replace(/`[^`\n]*`/g, '');
+}
 function headingSlugs(text) {
   const slugs = new Set();
   for (const m of text.matchAll(/^#{1,6}\s+(.+?)\s*#*$/gm)) {
@@ -170,7 +179,7 @@ function checkLinks() {
   for (const file of DOC_FILES()) {
     const text = readFileSync(file, 'utf8');
     const own = headingSlugs(text);
-    for (const m of text.matchAll(/\]\(([^)\s]+)\)/g)) {
+    for (const m of withoutCode(text).matchAll(/\]\(([^)\s]+)\)/g)) {
       const target = m[1];
       if (/^(https?:|mailto:)/.test(target)) continue;
       const [filePart, fragment] = target.split('#');

@@ -86,10 +86,14 @@ function versionTree(root: string, options: { readonly serverVersion?: string; r
 test('links gate fails on a broken link outside docs and passes a clean tree', () => {
   const dir = scratch();
   const gate = copyGate(dir, 'docs/check-docs.mjs');
-  markdownTree(dir, '# readme\n', '# contributing\n');
+  markdownTree(
+    dir,
+    '# readme\n\nAn example in code: `[missing](docs/does-not-exist.md)`.\n\n```md\n[missing](also-missing.md)\n```\n',
+    '# contributing\n',
+  );
   try {
     const clean = runScript(gate, ['links'], dir);
-    assert.equal(clean.code, 0, clean.stderr);
+    assert.equal(clean.code, 0, 'a link quoted inside code is an example, not a claim');
     assert.match(clean.stdout, /DOCS_LINKS_OK/);
 
     // A broken link in CONTRIBUTING.md used to be invisible: the gate only read
