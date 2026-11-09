@@ -75,10 +75,10 @@ What each domain contains:
 
 ### Example: `get_battery` (humanized)
 
-This is what a domain answer looks like, rendered from the project's sanitized test fixture (synthetic values):
+This is the shape of a domain answer. The values come from the project's sanitized test fixture; the label and age are illustrative:
 
 ```text
-Vehicle YSMTEST22PL000001: telemetry/battery (data observed 12 min ago)
+Vehicle My Car, telemetry/battery (data observed 12 min ago)
 Charge: 52% · range 170 km
 Charging: Idle · Unplugged
 Average consumption: 20.1 kWh/100km

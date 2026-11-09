@@ -24,6 +24,30 @@ The API is read-only, and so is this server. Every network call a tool makes is 
 
 A default start exposes 26 tools. Setting `POLESTAR_HISTORY_DIR` adds ten history tools and raises the surface to 36. The extra tools answer questions the API cannot, such as how the battery has aged, what a charging session cost, and what changed this week.
 
+A question follows one path:
+
+```mermaid
+sequenceDiagram
+    participant You
+    participant Client as MCP client
+    participant Server as polestar-mcp
+    participant Cache as cache
+    participant API as Polestar API
+
+    You->>Client: How is my car doing?
+    Client->>Server: tools/call get_car_status
+    Server->>Cache: battery, exterior, availability, odometer, health, target
+    alt fresh entries
+        Cache-->>Server: last values, each with an age
+    else stale or missing
+        Cache->>API: GET the missing domains
+        API-->>Cache: payloads
+        Cache-->>Server: values with ages
+    end
+    Server-->>Client: one briefing
+    Client-->>You: charge, range, locks, ages
+```
+
 ## Contents
 
 - [What it does](#what-it-does)
@@ -217,6 +241,65 @@ Average consumption: 20.1 kWh/100km
 
 The vehicle label comes from `POLESTAR_VEHICLE_LABELS`; without one the header shows the VIN, masked when `POLESTAR_REDACT_VIN=1`. The values match the sample data, and the age is illustrative. Domain tools answer in short prose. Passing `raw: true` appends the untouched API payload. A successful result carries that text plus structured data where the tool has one; failures use `structuredContent.message`.
 
+<details>
+<summary>More example answers from the sample data</summary>
+
+```text
+Vehicle My Car, telemetry/exterior (data observed 52 d ago)
+All doors, windows, hood and tailgate closed · Locked · alarm idle
+```
+
+```text
+Vehicle My Car, telemetry/odometer (data observed 52 d ago)
+Odometer: 122,953 km
+Trip meters: 2,863 km manual · 136 km automatic
+```
+
+```text
+Vehicle My Car, telemetry/health (data observed 52 d ago)
+Service in 313 days / 4150 km
+No warnings
+```
+
+```text
+Yes, car is secure (locked, all closed). Alarm: idle.
+```
+
+The ages are relative to when the sample data was captured. `is_car_secure` reads from the cache and answers without its own header.
+
+</details>
+
+### Example: plan the cheapest charge
+
+The prices are yours; the planner uses the car's charge window, target charge level, and amp limit. Here is the sample car, whose window is 23:00 to 06:00 at UTC+02:00 and whose target is 80 percent:
+
+```json
+{
+  "prices": [
+    { "startsAt": "2026-11-09T21:00:00.000Z", "price": 0.42 },
+    { "startsAt": "2026-11-09T22:00:00.000Z", "price": 0.35 },
+    { "startsAt": "2026-11-09T23:00:00.000Z", "price": 0.31 },
+    { "startsAt": "2026-11-10T00:00:00.000Z", "price": 0.28 },
+    { "startsAt": "2026-11-10T01:00:00.000Z", "price": 0.26 },
+    { "startsAt": "2026-11-10T02:00:00.000Z", "price": 0.24 },
+    { "startsAt": "2026-11-10T03:00:00.000Z", "price": 0.22 }
+  ]
+}
+```
+
+The answer names the hours it picked, the energy in each, and the assumptions it made:
+
+```text
+Charge plan (note: the car window is defined but INACTIVE on the car)
+Need: 18.399 kWh at the battery (20.444 kWh from the grid at 90% AC efficiency) to go from 52% to 80% in about 1.33h at 13.8 kW
+
+- 2026-11-10T02:00:00.000Z to 2026-11-10T03:00:00.000Z @ 0.24: 13.8 kWh at the battery, 15.3 kWh from the grid
+- 2026-11-10T03:00:00.000Z to 2026-11-10T04:00:00.000Z @ 0.22: 4.6 kWh at the battery, 5.1 kWh from the grid
+Estimated cost: 4.804 (the caller's currency per kWh)
+```
+
+The tool says when it cannot plan. Missing prices for any planned hour are refused rather than counted as zero, and a window that is too short is reported as infeasible with the shortfall.
+
 ## The tools
 
 One domain is one topic of vehicle data, such as `telemetry/battery`. The 15 `get_*` tools in the Telemetry and Charging groups map one-to-one onto the API's 15 read domains: 8 telemetry, 7 charging. The aggregate, planning, system, and history tools build on those reads or answer from local state.
@@ -224,6 +307,20 @@ One domain is one topic of vehicle data, such as `telemetry/battery`. The 15 `ge
 Every tool that reads a car takes an optional `vin`, the vehicle identification number. Omit it when the credential sees one vehicle. With several, the server asks the client which car when the client supports MCP elicitation or the 2026 input flow, validates the answer, and otherwise refuses with `AMBIGUOUS_VIN` and the known VINs so you can pass one explicitly. Argument names are strict; a misspelled `vin` is refused by name instead of quietly reading the default car. Third-party credentials can pass `delegated_account_id`, which is checked against the operator's allowlist because the API accepts unknown delegated IDs without complaint.
 
 A default start exposes 26 tools: 15 domain tools, 7 aggregate and planning tools, `list_vehicles`, `list_domains`, `list_vehicle_domains`, and `polestar_status`. With `POLESTAR_HISTORY_DIR` set, ten history tools join and the surface is 36.
+
+```mermaid
+flowchart TB
+    Client[MCP client] --> Server[polestar-mcp]
+    Server --> Domains[15 domain tools<br/>8 telemetry, 7 charging]
+    Server --> Aggregates[7 aggregate and planning tools]
+    Server --> Listings[3 listing tools]
+    Server --> Status[polestar_status]
+    Server --> History[10 history tools<br/>needs POLESTAR_HISTORY_DIR]
+    Domains --> API[Polestar Data Portal API]
+    Aggregates --> API
+    Listings -.-> API
+    History --> Store[(local JSONL store)]
+```
 
 <details>
 <summary>All 36 tools, grouped</summary>
@@ -280,6 +377,14 @@ A default start exposes 26 tools: 15 domain tools, 7 aggregate and planning tool
 ## History and privacy
 
 The API reports current state only, so questions about the past need a local store. Set `POLESTAR_HISTORY_DIR` and the server appends each live domain answer to a JSONL file, one JSON object per line, under that directory. The layout is one subdirectory per vehicle, named by VIN, and one `<kind>-<domain>.jsonl` file per domain. Deduplication is by the cloud's change ID (`metaEventId`): an unchanged snapshot is not appended, so a file grows only when the car reports a change. When a file would pass 64 MiB, it is rewritten with its newest half, so an unattended install does not grow without bound. Position is recorded only when location reads are allowed, and deleting the directory removes the history. Recording is passive: it reuses answers the server already fetched. To sample while nobody is asking, set `POLESTAR_SAMPLE=1`; the sampler covers battery, odometer, location, and exterior every 10 minutes by default and pauses at 80 percent of the budget. It requires `POLESTAR_HISTORY_DIR`.
+
+```mermaid
+flowchart LR
+    Read[tool call reads a domain] --> Store[(JSONL store)]
+    Sample[background sampler<br/>POLESTAR_SAMPLE=1] --> Store
+    Store --> Tools[10 history tools]
+    Tools --> Answers[degradation, sessions, cost, trips, timeline, digest]
+```
 
 Credentials stay on the machine, requests go only to Polestar, and the server sends no telemetry. The history store is opt-in. The full policy is in [docs/privacy.md](docs/privacy.md).
 
@@ -370,6 +475,18 @@ The budget fails closed. When the daily allowance is gone, further calls are ref
 
 Tokens are cached. One token request covers the union of all domain scopes (trim it with `POLESTAR_SCOPES` for least privilege), and the token is reused until expiry minus a five-minute skew. Concurrent callers share one request, and a 401 triggers exactly one fresh-token retry.
 
+```mermaid
+stateDiagram-v2
+    [*] --> NoToken
+    NoToken --> Trusted: POST /token
+    Trusted --> Trusted: calls reuse the cached token
+    Trusted --> Refreshing: next call inside five minutes of expiry
+    Trusted --> Refreshing: API answers 401, one retry
+    Refreshing --> Trusted: new token
+    Refreshing --> Error: token request fails
+    Error --> [*]
+```
+
 ## Resources, prompts, and subscriptions
 
 The server exposes resources at `polestar://vehicle/{vin}/{telemetry|charging}/{domain}`. The list comes from the vehicles your credential can see, and the VIN and domain arguments support completions. Reading a resource returns the same plain-language view as the matching tool, and two resource templates are registered, one per kind.
@@ -391,6 +508,30 @@ Each request is independent, while cache, budget, and history are shared. The li
 Point an HTTP-capable client at `http://127.0.0.1:8420/mcp` and send `Authorization: Bearer <token>`; the root URL answers too. Browser cross-origin requests are refused unless the `Origin` matches the request host or appears in `POLESTAR_HTTP_ALLOWED_ORIGINS`. When that allowlist is unset, the request's own host is the default; when it is set, the list replaces that default. A forged `Host` is refused either way.
 
 Both protocol eras are served from one listener. A 2025-era client gets the stateless legacy path; a `2026-07-28` client gets `server/discover` plus the per-request envelope, with the same 26-tool default surface, or 36 with history enabled. A modern request missing its envelope is refused by name, never silently downgraded. Resources and prompts work in both modes; subscriptions remain stdio only.
+
+<details>
+<summary>Talk to the listener with curl</summary>
+
+An initialize request:
+
+```sh
+curl -s http://127.0.0.1:8420/mcp \
+  -H 'Authorization: Bearer <token>' \
+  -H 'content-type: application/json' \
+  -H 'accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+```
+
+The reply arrives as a server-sent event; the JSON-RPC message is on the `data:` line, abbreviated here:
+
+```text
+event: message
+data: {"result":{"protocolVersion":"2025-06-18","capabilities":{"resources":{"subscribe":false},"tools":{},"prompts":{}},"serverInfo":{"name":"polestar-mcp","version":"0.3.0"}},"jsonrpc":"2.0","id":1}
+```
+
+A tool call uses the same shape with `"method":"tools/call"` and `"params":{"name":"get_battery","arguments":{}}`. The listener is stateless per request; the cache, budget, and history are shared across requests.
+
+</details>
 
 ## Development and testing
 

@@ -4,7 +4,7 @@ Who this is for: anyone who wants to ask an AI assistant about their Polestar. N
 
 ## What this is
 
-`polestar-mcp` is a server that connects an MCP client (Claude Desktop, ZCode, or any other tool that speaks the Model Context Protocol) to the Polestar Data Portal M2M API. Once it is connected, you can ask your assistant things like "how is my car doing?" or "is everything locked?" and it will call one of the server's tools to get the answer from Polestar's servers.
+`polestar-mcp` is a server that connects an MCP client (Claude Desktop, Cursor, or any other tool that speaks the Model Context Protocol) to the Polestar Data Portal M2M API. Once it is connected, you can ask your assistant things like "how is my car doing?" or "is everything locked?" and it will call one of the server's tools to get the answer from Polestar's servers.
 
 The whole surface is read-only: every tool carries the MCP `readOnlyHint`, and nothing is ever sent to the car. That is a property of the API Polestar publishes today, not a choice this server made (see [upstream-api.md](upstream-api.md)).
 
@@ -92,7 +92,7 @@ The server knows exactly which `POLESTAR_*` variables exist. When you set one it
 | `POLESTAR_ENV_FILE` | unset | Full path to a dotenv file to load, instead of `~/.config/polestar-mcp/.env.secrets` |
 | `POLESTAR_TIMEOUT_MS` | 15000 | Hard deadline per HTTP request |
 | `POLESTAR_BUDGET` | 10000 | Daily live-call ceiling. The server fails closed at the limit |
-| `POLESTAR_BUDGET_PER_MINUTE` | no | Rolling per-minute ceiling the API also publishes (100 req/min). Waits it out rather than failing; `100` default |
+| `POLESTAR_BUDGET_PER_MINUTE` | 100 | Rolling per-minute ceiling the API also publishes (100 req/min). Waits it out rather than failing |
 | `POLESTAR_BUDGET_LEDGER` | unset | Absolute path to a JSON file for the daily call count, so restarts and extra processes share one allowance. Unset keeps it in memory |
 | `POLESTAR_CACHE` | on | `off` (or `disabled`, `0`, `false`) disables the response cache |
 | `POLESTAR_SCOPES` | all domain scopes | Space- or comma-separated scope override for the token request |
@@ -129,7 +129,7 @@ The full list of tools, with example responses, is in [tools-reference.md](tools
 
 ## History, sampling, and privacy
 
-Set `POLESTAR_HISTORY_DIR` to a directory and the server records every live domain answer to an append-only store there, deduplicated by the cloud's change ID so unchanged snapshots cost a single line. Passive recording costs nothing extra: it reuses answers the server already fetched. If you also want the car sampled while no client is asking, set `POLESTAR_SAMPLE=1`, which runs a background round over the fast-moving domains (battery, odometer, location, exterior) every 10 minutes by default (`POLESTAR_HISTORY_SAMPLE_SECONDS` tunes this) and stands down entirely once 80% of the daily budget is spent. Sampling is off by default because polling spends the shared quota. The history tools (degradation trend, charging sessions) only exist when history is on.
+Set `POLESTAR_HISTORY_DIR` to a directory and the server records every live domain answer to an append-only store there, deduplicated by the cloud's change ID, so an unchanged snapshot is not appended. Passive recording costs nothing extra: it reuses answers the server already fetched. If you also want the car sampled while no client is asking, set `POLESTAR_SAMPLE=1`, which runs a background round over the fast-moving domains (battery, odometer, location, exterior) every 10 minutes by default (`POLESTAR_HISTORY_SAMPLE_SECONDS` tunes this) and stands down entirely once 80% of the daily budget is spent. Sampling is off by default because polling spends the shared quota. The history tools (degradation trend, charging sessions) only exist when history is on.
 
 Three privacy dials are built in: `POLESTAR_VEHICLE_LABELS` gives your cars friendly names (`POLESTAR_VEHICLE_LABELS="YSMTEST22PL000001=My Car"`), so answers say "My Car" instead of printing identifiers; `POLESTAR_REDACT_VIN=1` masks VINs in rendered output and in the structured envelope (first 3 and last 3 characters), with `raw:true` deliberately left faithful to the upstream payload; and `POLESTAR_ALLOW_LOCATION=0` makes the server refuse location reads and strip coordinates from aggregate answers.
 
